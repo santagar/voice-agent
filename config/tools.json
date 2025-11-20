@@ -1,0 +1,52 @@
+{
+  "tools": [
+    {
+      "name": "lookup_booking",
+      "description": "Fetch the status and summary of a booking given its locator or internal reference.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "locator": {
+            "type": "string",
+            "description": "Unique booking locator/reference."
+          },
+          "include_history": {
+            "type": "boolean",
+            "description": "If true, returns the change log or timeline."
+          }
+        },
+        "required": ["locator"]
+      },
+      "routes": {
+        "method": "GET",
+        "path": "/api/tools/bookings/:locator"
+      }
+    },
+    {
+      "name": "check_availability",
+      "description": "Checks availability for an activity or product on a given date range.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "product_id": {
+            "type": "string",
+            "description": "Internal product identifier."
+          },
+          "start_date": {
+            "type": "string",
+            "description": "ISO 8601 start date."
+          },
+          "end_date": {
+            "type": "string",
+            "description": "ISO 8601 end date."
+          }
+        },
+        "required": ["product_id", "start_date", "end_date"]
+      },
+      "routes": {
+        "method": "POST",
+        "path": "/api/tools/products/check-availability"
+      }
+    }
+  ]
+}
