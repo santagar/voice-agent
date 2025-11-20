@@ -1,24 +1,22 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { ArrowUp, Mic, MicOff, Phone, Volume2, VolumeX } from "lucide-react";
+import { Card } from "@/components/ui/Card";
+import { ChatBubble } from "@/components/ui/ChatBubble";
+import { Modal } from "@/components/ui/Modal";
+import { PillButton } from "@/components/ui/PillButton";
+import { StatusBadge } from "@/components/ui/StatusBadge";
 import sanitizeRules from "@/config/sanitization-rules.json";
 import toolsConfig from "@/config/tools.json";
 import assistantProfile from "@/config/assistant-profile.json";
+import { labTheme } from "@/lib/theme";
 
 type ChatMessage = {
   id: string;
   from: "user" | "assistant" | "system";
   text: string;
   meta?: string;
-};
-
-const STATUS_BADGE: Record<
-  "idle" | "calling" | "in_call",
-  { label: string; color: string }
-> = {
-  idle: { label: "Idle", color: "bg-slate-700/70" },
-  calling: { label: "Dialing…", color: "bg-amber-500/20 text-amber-200" },
-  in_call: { label: "Live session", color: "bg-emerald-500/20 text-emerald-200" },
 };
 
 const START_CALL_PROMPT =
@@ -29,67 +27,6 @@ type ScopeDefinition = {
 };
 
 const DEFAULT_SCOPE_RULES: ScopeDefinition[] = [];
-
-type IconProps = { className?: string };
-
-const iconProps = {
-  viewBox: "0 0 24 24",
-  fill: "none",
-  stroke: "currentColor",
-  strokeWidth: 1.8,
-  strokeLinecap: "round" as const,
-  strokeLinejoin: "round" as const,
-};
-
-const VolumeIcon = ({ className }: IconProps) => (
-  <svg className={className} {...iconProps}>
-    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-    <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-    <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
-  </svg>
-);
-
-const VolumeMuteIcon = ({ className }: IconProps) => (
-  <svg className={className} {...iconProps}>
-    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-    <line x1="23" y1="9" x2="17" y2="15" />
-    <line x1="17" y1="9" x2="23" y2="15" />
-  </svg>
-);
-
-const MicIcon = ({ className }: IconProps) => (
-  <svg className={className} {...iconProps}>
-    <path d="M12 1a4 4 0 0 0-4 4v6a4 4 0 0 0 8 0V5a4 4 0 0 0-4-4Z" />
-    <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-    <line x1="12" y1="19" x2="12" y2="23" />
-    <line x1="8" y1="23" x2="16" y2="23" />
-  </svg>
-);
-
-const MicMuteIcon = ({ className }: IconProps) => (
-  <svg className={className} {...iconProps}>
-    <line x1="1" y1="1" x2="23" y2="23" />
-    <path d="M9 5v6a3 3 0 0 0 3 3" />
-    <path d="M15 11V5a3 3 0 0 0-5.12-2.12" />
-    <path d="M5 10v2a7 7 0 0 0 11.34 5" />
-    <path d="M19 10v2a7 7 0 0 1-1.95 4.95" />
-    <line x1="12" y1="19" x2="12" y2="23" />
-    <line x1="8" y1="23" x2="16" y2="23" />
-  </svg>
-);
-
-const PhoneIcon = ({ className }: IconProps) => (
-  <svg className={className} {...iconProps}>
-    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2L8.09 9.91a16 16 0 0 0 6 6l1.34-1.34a2 2 0 0 1 2-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92Z" />
-  </svg>
-);
-
-const ArrowUpIcon = ({ className }: IconProps) => (
-  <svg className={className} {...iconProps}>
-    <line x1="12" y1="19" x2="12" y2="5" />
-    <polyline points="5 12 12 5 19 12" />
-  </svg>
-);
 
 export default function LabPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -859,10 +796,16 @@ function flushPendingAssistantText(delay = 200) {
   }
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-slate-100">
+    <main
+      className="min-h-screen bg-slate-950 text-slate-100"
+      style={{ backgroundImage: labTheme.gradients.canvas }}
+    >
       <div className="mx-auto flex max-w-6xl flex-col gap-6 px-6 py-12 lg:flex-row lg:items-stretch">
         {/* Left column: control panel */}
-        <section className="flex w-full flex-col rounded-3xl border border-white/5 bg-white/5 p-6 backdrop-blur-xl lg:max-w-sm">
+        <section
+          className="flex w-full flex-col rounded-3xl border border-white/5 bg-white/5 p-6 backdrop-blur-xl lg:max-w-sm"
+          style={{ borderRadius: labTheme.radii.shell }}
+        >
           <header className="mb-6">
             <p className="text-sm uppercase tracking-[0.3em] text-slate-400">
               Lab Mode
@@ -876,7 +819,7 @@ function flushPendingAssistantText(delay = 200) {
           </header>
 
           <div className="space-y-4 text-sm">
-            <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+            <Card>
               <div className="flex items-center justify-between">
                 <span className="text-slate-400">Realtime API WebSocket</span>
                 <span
@@ -899,16 +842,12 @@ function flushPendingAssistantText(delay = 200) {
                     : "Waiting for realtime-server"}
                 </span>
               </div>
-            </div>
+            </Card>
 
-            <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+            <Card>
               <div className="flex items-center justify-between text-slate-300">
                 <span>Voice session</span>
-                <span
-                  className={`rounded-full px-3 py-1 text-xs font-semibold ${STATUS_BADGE[callStatus].color}`}
-                >
-                  {STATUS_BADGE[callStatus].label}
-                </span>
+                <StatusBadge status={callStatus} />
               </div>
               <div className="mt-4 grid grid-cols-2 gap-3 text-xs font-medium text-slate-400">
                 <div className="rounded-xl border border-white/10 bg-slate-900/60 p-3">
@@ -946,9 +885,9 @@ function flushPendingAssistantText(delay = 200) {
                       title={muted ? "Unmute speaker" : "Mute speaker"}
                     >
                       {muted ? (
-                        <VolumeMuteIcon className="mx-auto h-5 w-5" />
+                        <VolumeX strokeWidth={1.8} className="mx-auto h-5 w-5" />
                       ) : (
-                        <VolumeIcon className="mx-auto h-5 w-5" />
+                        <Volume2 strokeWidth={1.8} className="mx-auto h-5 w-5" />
                       )}
                     </button>
                     <button
@@ -961,9 +900,9 @@ function flushPendingAssistantText(delay = 200) {
                       title={micMuted ? "Unmute mic" : "Mute mic"}
                     >
                       {micMuted ? (
-                        <MicMuteIcon className="mx-auto h-5 w-5" />
+                        <MicOff strokeWidth={1.8} className="mx-auto h-5 w-5" />
                       ) : (
-                        <MicIcon className="mx-auto h-5 w-5" />
+                        <Mic strokeWidth={1.8} className="mx-auto h-5 w-5" />
                       )}
                     </button>
                     <button
@@ -971,7 +910,7 @@ function flushPendingAssistantText(delay = 200) {
                       className="group flex-1 cursor-pointer rounded-full border border-rose-500/70 bg-rose-500/20 px-3.5 py-2.5 text-rose-100 hover:bg-rose-500/30"
                       title="End call"
                     >
-                      <PhoneIcon className="mx-auto h-5 w-5" />
+                      <Phone strokeWidth={1.8} className="mx-auto h-5 w-5" />
                     </button>
                   </>
                 ) : (
@@ -981,27 +920,33 @@ function flushPendingAssistantText(delay = 200) {
                     className="w-full cursor-pointer rounded-full border border-emerald-400/60 bg-emerald-500/10 px-4 py-3 font-semibold text-emerald-100 transition disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/5 disabled:text-slate-500"
                   >
                     <span className="flex items-center justify-center gap-2 text-base">
-                      <PhoneIcon className="h-4 w-4" />
+                      <Phone strokeWidth={1.8} className="h-4 w-4" />
                       Voice session
                     </span>
                   </button>
                 )}
               </div>
-            </div>
+            </Card>
 
-            <div className="rounded-2xl border border-white/5 bg-black/40 p-4 text-xs text-slate-400">
+            <Card tone="muted" className="text-xs text-slate-400">
               <p className="mb-2 font-semibold text-slate-200">Session notes</p>
               <ul className="space-y-1">
                 <li>• Voice is fully synthetic and auto-muted when the assistant speaks.</li>
                 <li>• You can still type while the mic is open.</li>
                 <li>• Safety policies and RAG context apply to every reply.</li>
               </ul>
-            </div>
+            </Card>
           </div>
         </section>
 
         {/* Right column: conversation + composer */}
-        <section className="flex flex-1 flex-col rounded-[28px] border border-white/5 bg-slate-950/80 shadow-[0_0_80px_rgba(15,23,42,0.65)]">
+        <section
+          className="flex flex-1 flex-col rounded-[28px] border border-white/5 bg-slate-950/80"
+          style={{
+            borderRadius: labTheme.radii.panel,
+            boxShadow: labTheme.shadows.panel,
+          }}
+        >
           <div className="flex items-center justify-between border-b border-white/5 px-6 py-4">
             <div>
               <p className="text-sm uppercase tracking-[0.35em] text-slate-500">
@@ -1012,38 +957,22 @@ function flushPendingAssistantText(delay = 200) {
               </h2>
             </div>
             <div className="flex flex-wrap gap-2 text-xs text-slate-400">
-              <button
-                type="button"
-                onClick={() => setScopeModalOpen(true)}
-                className="flex items-center gap-2 rounded-full border border-white/10 px-3 py-1.5 transition hover:border-white/30"
-              >
+              <PillButton onClick={() => setScopeModalOpen(true)}>
                 <span className="h-2 w-2 rounded-full bg-sky-400" />
                 Scope: {currentScope}
-              </button>
-              <button
-                type="button"
-                onClick={() => setProfileModalOpen(true)}
-                className="flex items-center gap-2 rounded-full border border-white/10 px-3 py-1.5 transition hover:border-white/30"
-              >
+              </PillButton>
+              <PillButton onClick={() => setProfileModalOpen(true)}>
                 <span className="h-2 w-2 rounded-full bg-rose-400" />
                 Profile
-              </button>
-              <button
-                type="button"
-                onClick={() => setSanitizeModalOpen(true)}
-                className="flex items-center gap-2 rounded-full border border-white/10 px-3 py-1.5 transition hover:border-white/30"
-              >
+              </PillButton>
+              <PillButton onClick={() => setSanitizeModalOpen(true)}>
                 <span className="h-2 w-2 rounded-full bg-emerald-400" />
                 Sanitized streaming
-              </button>
-              <button
-                type="button"
-                onClick={() => setToolsModalOpen(true)}
-                className="flex items-center gap-2 rounded-full border border-white/10 px-3 py-1.5 transition hover-border-white/30"
-              >
+              </PillButton>
+              <PillButton onClick={() => setToolsModalOpen(true)}>
                 <span className="h-2 w-2 rounded-full bg-purple-400" />
                 Tools
-              </button>
+              </PillButton>
             </div>
           </div>
 
@@ -1058,33 +987,9 @@ function flushPendingAssistantText(delay = 200) {
               </div>
             )}
             {messages.map((message) => (
-              <article
-                key={message.id}
-                className={`flex ${
-                  message.from === "user"
-                    ? "justify-end"
-                    : message.from === "assistant"
-                    ? "justify-start"
-                    : "justify-center"
-                }`}
-              >
-                <div
-                  className={`max-w-xl rounded-3xl px-4 py-3 text-sm leading-relaxed ${
-                    message.from === "user"
-                      ? "bg-gradient-to-br from-sky-500 to-blue-500 text-white shadow-lg"
-                      : message.from === "assistant"
-                      ? "border border-white/10 bg-white/[0.04] text-slate-100"
-                      : "border border-amber-200/40 bg-amber-500/10 px-2 py-1.5 text-left text-[8px] uppercase tracking-[0.2em] text-amber-100"
-                  }`}
-                >
-                  {message.text}
-                  {message.meta && (
-                    <span className="ms-2 inline-block text-[7px] font-medium uppercase tracking-[0.15em] text-slate-500">
-                      {message.meta}
-                    </span>
-                  )}
-                </div>
-              </article>
+              <ChatBubble key={message.id} from={message.from} meta={message.meta}>
+                {message.text}
+              </ChatBubble>
             ))}
             {loading && (
               <div className="flex items-center gap-3 text-xs text-slate-500">
@@ -1148,9 +1053,9 @@ function flushPendingAssistantText(delay = 200) {
                 }
               >
                 {hasTypedInput ? (
-                  <ArrowUpIcon className="h-5 w-5" />
+                  <ArrowUp strokeWidth={1.8} className="h-5 w-5" />
                 ) : (
-                  <PhoneIcon className="h-5 w-5" />
+                  <Phone strokeWidth={1.8} className="h-5 w-5" />
                 )}
               </button>
             </div>
@@ -1236,31 +1141,5 @@ function flushPendingAssistantText(delay = 200) {
         </Modal>
       )}
     </main>
-  );
-}
-
-type ModalProps = {
-  title: string;
-  onClose: () => void;
-  children: React.ReactNode;
-};
-
-function Modal({ title, onClose, children }: ModalProps) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
-      <div className="w-full max-w-2xl rounded-3xl border border-white/10 bg-slate-950/90 p-6 shadow-[0_0_60px_rgba(15,23,42,0.7)]">
-        <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-white">{title}</h3>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-full border border-white/20 px-3 py-1 text-xs text-slate-300 hover:border-white/50"
-          >
-            Close
-          </button>
-        </div>
-        <div className="max-h-[360px] overflow-y-auto pr-1">{children}</div>
-      </div>
-    </div>
   );
 }

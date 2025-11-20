@@ -3,6 +3,31 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  --color-canvas-from: #020617;
+  --color-canvas-via: #0f172a;
+  --color-canvas-to: #020617;
+  --color-surface: rgba(255, 255, 255, 0.05);
+  --color-surface-frost: rgba(255, 255, 255, 0.04);
+  --color-surface-muted: rgba(0, 0, 0, 0.4);
+  --color-border-strong: rgba(255, 255, 255, 0.1);
+  --color-border-soft: rgba(255, 255, 255, 0.05);
+  --color-accent: #34d399;
+  --color-danger: #fb7185;
+  --color-warning: #fbbf24;
+  --radius-shell: 24px;
+  --radius-panel: 28px;
+  --radius-card: 16px;
+  --radius-bubble: 24px;
+  --radius-pill: 9999px;
+  --radius-modal: 24px;
+  --shadow-panel: 0 0 80px rgba(15, 23, 42, 0.65);
+  --shadow-modal: 0 0 60px rgba(15, 23, 42, 0.7);
+  --gradient-canvas: linear-gradient(
+    135deg,
+    var(--color-canvas-from) 0%,
+    var(--color-canvas-via) 50%,
+    var(--color-canvas-to) 100%
+  );
 }
 
 @theme inline {
@@ -22,5 +47,68 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
+}
+
+/* Placeholder for future animated dots if needed */
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  display: inline-block;
+}
+
+.dot-online {
+  background: #34d399;
+  box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.45);
+  animation: dot-pulse-online 1.4s ease-in-out infinite;
+}
+
+.dot-offline {
+  background: #fb7185;
+  box-shadow: 0 0 0 0 rgba(251, 113, 133, 0.45);
+  animation: dot-pulse-offline 1.4s ease-in-out infinite;
+}
+
+.dot-thinking {
+  background: #a855f7;
+  box-shadow: 0 0 0 0 rgba(168, 85, 247, 0.5);
+  animation: dot-pulse-thinking 1.4s ease-in-out infinite;
+}
+
+@keyframes dot-pulse-online {
+  0% {
+    box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.45);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(52, 211, 153, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(52, 211, 153, 0);
+  }
+}
+
+@keyframes dot-pulse-offline {
+  0% {
+    box-shadow: 0 0 0 0 rgba(251, 113, 133, 0.45);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(251, 113, 133, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(251, 113, 133, 0);
+  }
+}
+
+@keyframes dot-pulse-thinking {
+  0% {
+    box-shadow: 0 0 0 0 rgba(168, 85, 247, 0.5);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(168, 85, 247, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(168, 85, 247, 0);
+  }
 }
