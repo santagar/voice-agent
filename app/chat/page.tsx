@@ -48,6 +48,7 @@ export default function MobileVoiceChat() {
   );
   const [showMobileControls, setShowMobileControls] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [showMobileSidebar, setShowMobileSidebar] = useState(false);
   const [showHeaderDivider, setShowHeaderDivider] = useState(false);
   const [muted, setMuted] = useState(false);
   const [micMuted, setMicMuted] = useState(false);
@@ -668,10 +669,20 @@ export default function MobileVoiceChat() {
       className="min-h-screen bg-slate-950 text-slate-100 overflow-hidden"
       style={{ backgroundImage: labTheme.gradients.canvas }}
     >
-      <div className="flex h-screen overflow-hidden">
+          <div className="flex h-screen overflow-hidden">
         <aside
-          className="relative hidden h-full flex-col border-r border-white/5 bg-black/30 backdrop-blur-xl transition-[width] duration-300 md:flex"
-          style={{ width: sidebarCollapsed ? 84 : 280 }}
+          className={`flex-col border-r border-white/5 bg-black/30 backdrop-blur-xl transition-[transform] duration-300 ${
+            showMobileSidebar
+              ? "fixed inset-y-0 left-0 z-40 flex h-full w-[60vw] max-w-sm translate-x-0 shadow-2xl md:relative md:w-auto md:translate-x-0"
+              : "hidden -translate-x-full md:relative md:flex md:h-full md:w-auto md:translate-x-0"
+          }`}
+          style={
+            showMobileSidebar
+              ? undefined
+              : {
+                  width: sidebarCollapsed ? 52 : 260,
+                }
+          }
         >
           <div className="flex items-center gap-2 px-4 py-4">
             <button
@@ -683,14 +694,6 @@ export default function MobileVoiceChat() {
                 className={`h-4 w-4 transition ${sidebarCollapsed ? "rotate-180" : ""}`}
               />
             </button>
-            {!sidebarCollapsed && (
-              <div className="flex flex-col">
-                <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">
-                  Tablero
-                </p>
-                <p className="text-lg font-semibold text-white">Voice Agent</p>
-              </div>
-            )}
             <button
               className={`ml-auto flex items-center justify-center rounded-full border border-white/15 bg-white/5 px-3 py-2 text-sm font-semibold text-white transition hover:border-white/30 hover:bg-white/10 ${
                 sidebarCollapsed ? "w-10 px-0" : ""
@@ -699,7 +702,6 @@ export default function MobileVoiceChat() {
               title="Nuevo chat"
             >
               <Plus className="h-4 w-4" />
-              {!sidebarCollapsed && <span className="ml-2">Nuevo chat</span>}
             </button>
           </div>
 
@@ -754,6 +756,13 @@ export default function MobileVoiceChat() {
           </div>
         </aside>
 
+        {showMobileSidebar && (
+          <div
+            className="fixed inset-0 z-30 bg-black/50 md:hidden"
+            onClick={() => setShowMobileSidebar(false)}
+            aria-hidden
+          />
+        )}
         <div className="flex flex-1 flex-col min-w-0 bg-black/30 backdrop-blur-xl">
           <header
             className={`sticky top-0 z-20 flex flex-wrap items-center justify-between gap-2 border-b bg-transparent px-4 py-3 transition-colors sm:px-6 md:px-2 ${
@@ -762,8 +771,8 @@ export default function MobileVoiceChat() {
           >
             <div className="flex items-center gap-1.5">
               <button
-                onClick={() => setSidebarCollapsed((prev) => !prev)}
-                className="flex items-center justify-center bg-transparent text-white transition md:hidden"
+                onClick={() => setShowMobileSidebar((prev) => !prev)}
+                className="flex h-11 w-11 items-center justify-center rounded-lg bg-transparent text-white transition sm:hidden"
                 aria-label="Toggle menú"
               >
                 <Menu className="h-5 w-5" />
