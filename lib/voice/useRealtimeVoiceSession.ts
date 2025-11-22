@@ -29,6 +29,21 @@ const VAD_SILENCE_MS = Number(
   process.env.NEXT_PUBLIC_VAD_SILENCE_MS ?? "500"
 );
 
+// Multiplier applied over the estimated noise floor to decide
+// when an RMS value is considered "voice". Higher values make
+// the detector more conservative (less sensitive to background).
+const VAD_NOISE_FACTOR = Number(
+  process.env.NEXT_PUBLIC_VAD_NOISE_FACTOR ?? "2.5"
+);
+
+// Minimum amount of continuous detected voice (in ms) required
+// before we treat it as a true barge-in that should interrupt
+// the assistant. This prevents tiny "mm"/keyboard spikes from
+// immediately cancelling the current response.
+const BARGE_IN_MIN_MS = Number(
+  process.env.NEXT_PUBLIC_BARGE_IN_MIN_MS ?? "220"
+);
+
 // Minimum number of PCM16 samples required to treat a detected
 // voice segment as a real utterance to transcribe. At 24kHz,
 // 2400 samples ≈ 100ms of audio.
@@ -66,9 +81,11 @@ export function useRealtimeVoiceSession(
   const activeAssistantSourcesRef = useRef<
     { source: AudioBufferSourceNode; gain: GainNode }[]
   >([]);
+  const noiseFloorRef = useRef(0);
   const userUtteranceChunksRef = useRef<Int16Array[]>([]);
   const userUtteranceActiveRef = useRef(false);
   const userUtteranceLastVoiceMsRef = useRef<number | null>(null);
+  const userUtteranceFirstVoiceMsRef = useRef<number | null>(null);
   const hasSentAudioRef = useRef(false);
   const currentUserUtteranceIdRef = useRef<string | null>(null);
 
@@ -86,6 +103,7 @@ export function useRealtimeVoiceSession(
   const dropAssistantAudioRef = useRef(false);
   const introPromptTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastUserTurnAtRef = useRef<number | null>(null);
 
   const scopeCatalog = useMemo(() => {
     const merged = new Map<string, Set<string>>();
@@ -299,7 +317,8 @@ export function useRealtimeVoiceSession(
 
   async function transcribeUserUtterance(
     pcm16: Int16Array,
-    messageId?: string
+    messageId?: string,
+    options?: { duringAssistant?: boolean }
   ) {
     try {
       if (!inCallRef.current) return;
@@ -326,6 +345,108 @@ export function useRealtimeVoiceSession(
       if (!transcript || !inCallRef.current) {
         return;
       }
+
+      const lower = transcript.toLowerCase();
+      const compact = lower.replace(/[^a-záéíóúüñ]/g, "");
+      const isFillerUtterance =
+        compact.length > 0 &&
+        compact.length <= 6 &&
+        !transcript.includes(" ") &&
+        /^[mheauáéíóúsh]+$/.test(compact);
+      if (isFillerUtterance) {
+        // Treat very short, vowel/consonant-only utterances like
+        // "mmm", "eh", "shh" as non-intentional noise. Remove any
+        // breathing dot placeholder and reset utterance tracking so
+        // nothing is rendered in the chat.
+        if (messageId) {
+          setMessages((prev) =>
+            prev.filter((msg) => msg.id !== messageId)
+          );
+        }
+        userUtteranceActiveRef.current = false;
+        userUtteranceChunksRef.current = [];
+        userUtteranceLastVoiceMsRef.current = null;
+        userUtteranceFirstVoiceMsRef.current = null;
+        currentUserUtteranceIdRef.current = null;
+        return;
+      }
+
+      const duringAssistant = Boolean(options?.duringAssistant);
+
+      // For short, single-word utterances or barge-in scenarios
+      // (assistant currently speaking), ask a lightweight classifier
+      // whether this should be treated as a real user turn or noise.
+      const isShortSingleWord =
+        !transcript.includes(" ") && transcript.length <= 12;
+      if (duringAssistant || isShortSingleWord) {
+        try {
+          const intentRes = await fetch("/api/voice-intent", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: transcript }),
+          });
+          if (intentRes.ok) {
+            const intentJson = (await intentRes.json()) as {
+              decision?: string;
+            };
+            const decision = String(
+              intentJson.decision || ""
+            ).toUpperCase();
+
+            if (decision === "IGNORE") {
+              // Drop this utterance entirely from the chat UI
+              // (remove placeholder if present) and do not
+              // change scope or send to the assistant. Also
+              // reset utterance tracking so any breathing dot
+              // associated with this segment disappears.
+              if (messageId) {
+                setMessages((prev) =>
+                  prev.filter((msg) => msg.id !== messageId)
+                );
+              }
+              userUtteranceActiveRef.current = false;
+              userUtteranceChunksRef.current = [];
+              userUtteranceLastVoiceMsRef.current = null;
+              userUtteranceFirstVoiceMsRef.current = null;
+              currentUserUtteranceIdRef.current = null;
+
+              // If this was noise while the assistant was speaking,
+              // we just ignore it. If the assistant was silent, we
+              // also drop it instead of showing a spurious bubble.
+              return;
+            }
+
+            // USER_TURN: if the assistant is currently speaking,
+            // interrupt the ongoing response so the next audio/text
+            // belongs to this new turn. If the assistant is silent,
+            // we simply treat this as a normal user turn.
+            if (decision === "USER_TURN" && duringAssistant && assistantTalkingRef.current) {
+              interruptAssistant();
+              dropAssistantResponsesRef.current = false;
+              dropAssistantAudioRef.current = false;
+            }
+          }
+        } catch (err) {
+          console.error(
+            "Voice intent classification failed (falling back to USER_TURN):",
+            err
+          );
+          // Fall through as USER_TURN.
+        }
+      }
+
+      // At this point we have accepted this utterance as a real user
+      // turn (not filler, not IGNORE). Ensure the next assistant
+      // response is allowed to render in text/audio, even if a
+      // previous turn was interrupted.
+      dropAssistantResponsesRef.current = false;
+      dropAssistantAudioRef.current = false;
+
+      const nowTs =
+        typeof performance !== "undefined" && typeof performance.now === "function"
+          ? performance.now()
+          : Date.now();
+      lastUserTurnAtRef.current = nowTs;
 
       const nextScope = await autoDetectScope(transcript);
       if (messageId) {
@@ -421,7 +542,7 @@ export function useRealtimeVoiceSession(
         input.length > 0 ? Math.sqrt(sumSquares / input.length) : 0;
 
       const nowMs =
-        typeof performance !== "undefined" && performance.now
+        typeof performance !== "undefined" && typeof performance.now === "function"
           ? performance.now()
           : Date.now();
 
@@ -463,19 +584,55 @@ export function useRealtimeVoiceSession(
         }
       }
 
-      if (rms > VAD_VOICE_THRESHOLD) {
-        if (assistantTalkingRef.current) {
-          interruptAssistant();
-        }
+      // Update a simple noise floor estimate when we are not
+      // currently tracking an utterance, so we can make the
+      // detector more conservative in noisy environments.
+      if (!userUtteranceActiveRef.current) {
+        const alpha = 0.05;
+        const prev = noiseFloorRef.current || 0;
+        const next = alpha * rms + (1 - alpha) * prev;
+        noiseFloorRef.current = next;
+      }
 
+      const minFloor = VAD_VOICE_THRESHOLD / 2;
+      const floor = Math.max(noiseFloorRef.current, minFloor);
+      const dynamicThreshold = Math.max(
+        VAD_VOICE_THRESHOLD,
+        floor * VAD_NOISE_FACTOR
+      );
+
+      if (rms > dynamicThreshold) {
         // Start or continue tracking a potential utterance.
         if (!userUtteranceActiveRef.current) {
           userUtteranceActiveRef.current = true;
           userUtteranceChunksRef.current = [new Int16Array(buffer)];
+          userUtteranceFirstVoiceMsRef.current = nowMs;
         } else {
           userUtteranceChunksRef.current.push(new Int16Array(buffer));
         }
         userUtteranceLastVoiceMsRef.current = nowMs;
+
+        // Fast barge-in: if the assistant is currently speaking and
+        // we detect a coherent block of user voice (both in time and
+        // sample count), cancel the ongoing response immediately so
+        // the next assistant turn belongs to this new utterance.
+        if (
+          assistantTalkingRef.current &&
+          userUtteranceFirstVoiceMsRef.current !== null
+        ) {
+          const elapsedMs = nowMs - userUtteranceFirstVoiceMsRef.current;
+          const totalSamples = userUtteranceChunksRef.current.reduce(
+            (sum, c) => sum + c.length,
+            0
+          );
+          const minBargeInSamples = MIN_UTTERANCE_SAMPLES * 2;
+          if (
+            elapsedMs >= BARGE_IN_MIN_MS &&
+            totalSamples >= minBargeInSamples
+          ) {
+            interruptAssistant();
+          }
+        }
 
         // Only create the "…" placeholder once we have accumulated
         // enough audio to be considered a real utterance. This avoids
@@ -489,10 +646,16 @@ export function useRealtimeVoiceSession(
           if (totalSamples >= MIN_UTTERANCE_SAMPLES) {
             const id = crypto.randomUUID();
             currentUserUtteranceIdRef.current = id;
-            setMessages((prev) => [
-              ...prev,
-              { id, from: "user", text: "…" },
-            ]);
+            // Ensure there is at most one breathing dot at a time.
+            setMessages((prev) => {
+              const withoutDots = prev.filter(
+                (msg) => !(msg.from === "user" && msg.text === "…")
+              );
+              return [
+                ...withoutDots,
+                { id, from: "user", text: "…" },
+              ];
+            });
           }
         }
       } else if (
@@ -504,6 +667,7 @@ export function useRealtimeVoiceSession(
         userUtteranceActiveRef.current = false;
         userUtteranceChunksRef.current = [];
         userUtteranceLastVoiceMsRef.current = null;
+        userUtteranceFirstVoiceMsRef.current = null;
 
         if (chunks.length > 0) {
           const totalSamples = chunks.reduce(
@@ -530,8 +694,10 @@ export function useRealtimeVoiceSession(
             merged.set(c, offset);
             offset += c.length;
           }
-
-          void transcribeUserUtterance(merged, messageId || undefined);
+          const duringAssistant = assistantTalkingRef.current;
+          void transcribeUserUtterance(merged, messageId || undefined, {
+            duringAssistant,
+          });
         }
       }
     };
@@ -730,16 +896,11 @@ export function useRealtimeVoiceSession(
           }
 
           if (data.type === "response.text.delta") {
-            const delta: string = data.delta ?? "";
-            if (
-              !delta ||
-              dropAssistantResponsesRef.current ||
-              !currentResponseId ||
-              (eventResponseId && eventResponseId !== currentResponseId)
-            ) {
-              return;
-            }
-            currentAssistantTextRef.current += delta;
+            // For voice interactions we rely on the unified
+            // audio_transcript.* stream. Plain text deltas are
+            // ignored to avoid duplicating messages when both
+            // channels are enabled.
+            return;
           }
 
           if (data.type === "response.audio_transcript.delta") {
@@ -760,8 +921,6 @@ export function useRealtimeVoiceSession(
             if (id) {
               currentResponseIdRef.current = id;
             }
-            dropAssistantResponsesRef.current = false;
-            dropAssistantAudioRef.current = false;
             currentAssistantTextRef.current = "";
             pendingAssistantTextRef.current = null;
             setLoading(false);
@@ -772,20 +931,10 @@ export function useRealtimeVoiceSession(
           }
 
           if (data.type === "response.text.done") {
-            const finalText = currentAssistantTextRef.current;
-            currentAssistantTextRef.current = "";
-            if (
-              !finalText ||
-              dropAssistantResponsesRef.current ||
-              !currentResponseId ||
-              (eventResponseId && eventResponseId !== currentResponseId)
-            ) {
-              pendingAssistantTextRef.current = null;
-              setLoading(false);
-              return;
-            }
-            pendingAssistantTextRef.current = finalText;
-            flushPendingAssistantText(80);
+            // Ignore plain text completions; we prefer the
+            // audio_transcript.* events as the single source
+            // of truth for assistant messages in the chat.
+            return;
           }
 
           if (data.type === "response.audio_transcript.done") {
@@ -925,6 +1074,12 @@ export function useRealtimeVoiceSession(
       interruptAssistant();
     }
 
+    const nowTs =
+      typeof performance !== "undefined" && typeof performance.now === "function"
+        ? performance.now()
+        : Date.now();
+    lastUserTurnAtRef.current = nowTs;
+
     let scopeForMessage = currentScope;
     if (!options?.silent) {
       scopeForMessage = await autoDetectScope(trimmed);
@@ -994,9 +1149,9 @@ export function useRealtimeVoiceSession(
       if (!inCallRef.current) return;
       setCallStatus("in_call");
       pushSystem("Call established", "success");
-      if (startCallPrompt) {
-        void sendUserMessage(startCallPrompt, { silent: true });
-      }
+      // We no longer send an automatic text prompt at call
+      // start; the profile instructions govern how the
+      // assistant greets the user once they actually speak.
     }, 500);
   }
 
@@ -1090,18 +1245,41 @@ export function useRealtimeVoiceSession(
         endCall();
         break;
       case "mute_speaker":
+        {
+          // Only honor mute_speaker if it follows a recent
+          // user turn; this avoids accidental or spurious
+          // tool invocations when there was no clear user
+          // request to mute the voice.
+          const nowTs =
+            typeof performance !== "undefined" && typeof performance.now === "function"
+              ? performance.now()
+              : Date.now();
+          const lastUser = lastUserTurnAtRef.current;
+          const MAX_LAG_MS = 5000;
+          if (!lastUser || nowTs - lastUser > MAX_LAG_MS) {
+            pushSystem?.(
+              "Ignoring unexpected mute_speaker tool (no recent user request).",
+              "tool"
+            );
+            break;
+          }
         // Force speaker muted, regardless of current state.
         setMuted(true);
         mutedRef.current = true;
-        // Speaker mute is a local UI concern; do not
-        // keep dropping assistant audio chunks after this.
+        // Speaker mute is a local UI concern; text responses
+        // should still be rendered in the chat. Ensure we are
+        // not dropping assistant output, only silencing audio.
+        dropAssistantResponsesRef.current = false;
         dropAssistantAudioRef.current = false;
+        }
         break;
       case "unmute_speaker":
         // Force speaker unmuted, regardless of current state.
         setMuted(false);
         mutedRef.current = false;
-        // Ensure future assistant audio is accepted again.
+        // Ensure future assistant responses are accepted and
+        // both text and audio can flow normally again.
+        dropAssistantResponsesRef.current = false;
         dropAssistantAudioRef.current = false;
         break;
       case "mute_mic":

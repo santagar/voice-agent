@@ -7,11 +7,15 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "realtime": "node realtime-server.js",
-    "dev:all": "concurrently \"npm run dev\" \"npm run realtime\"",
+    "realtime": "node dist/realtime/server.js",
+    "realtime:js": "node dist/realtime/server.js",
+    "build:realtime": "tsc -p tsconfig.realtime.json",
+    "dev:all": "npm run build:realtime && concurrently \"npm run dev\" \"npm run realtime\"",
+    "dev:all:js": "npm run build:realtime && concurrently \"npm run dev\" \"npm run realtime:js\"",
     "build:kb": "node scripts/build-knowledge.cjs"
   },
   "dependencies": {
+    "@jitsi/rnnoise-wasm": "^0.2.1",
     "dotenv": "^17.2.3",
     "lucide-react": "^0.554.0",
     "next": "16.0.3",
