@@ -6,7 +6,7 @@ import path from "path";
 export const dynamic = "force-dynamic";
 
 /**
- * Minimal metadata stored inside knowledge-items.json.
+ * Minimal metadata stored inside knowledge/items.json.
  * Only the fields needed to build the scope catalog are represented here.
  */
 type KnowledgeItem = {
@@ -32,15 +32,11 @@ let vectorsCache: KnowledgeVector[] | null = null;
 
 function readKnowledgeItems(): KnowledgeItem[] {
   try {
-    const filePath = path.join(
-      process.cwd(),
-      "knowledge",
-      "knowledge-items.json"
-    );
+    const filePath = path.join(process.cwd(), "knowledge", "items.json");
     const raw = fs.readFileSync(filePath, "utf-8");
     return JSON.parse(raw);
   } catch (err) {
-    console.error("Failed to read knowledge-items.json:", err);
+    console.error("Failed to read items.json:", err);
     return [];
   }
 }
@@ -48,15 +44,11 @@ function readKnowledgeItems(): KnowledgeItem[] {
 function loadKnowledgeVectors(): KnowledgeVector[] {
   if (vectorsCache) return vectorsCache;
   try {
-    const filePath = path.join(
-      process.cwd(),
-      "knowledge",
-      "knowledge-vectors.json"
-    );
+    const filePath = path.join(process.cwd(), "knowledge", "vectors.json");
     const raw = fs.readFileSync(filePath, "utf-8");
     vectorsCache = JSON.parse(raw);
   } catch (err) {
-    console.error("Failed to load knowledge-vectors.json:", err);
+    console.error("Failed to load vectors.json:", err);
     vectorsCache = [];
   }
   return vectorsCache ?? [];
@@ -113,7 +105,7 @@ export function GET() {
  * POST /api/scopes
  * Body: { text: string }
  * Takes a snippet of user text, embeds it with OpenAI, and compares the vector
- * against knowledge-vectors.json to find the most likely scope.
+ * against knowledge/vectors.json to find the most likely scope.
  */
 export async function POST(req: NextRequest) {
   const { text } = await req.json().catch(() => ({ text: "" }));
@@ -138,8 +130,11 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const embeddingModel =
+    process.env.EMBEDDING_MODEL || "text-embedding-3-small";
+
   const embeddingRes = await openai.embeddings.create({
-    model: "text-embedding-3-small",
+    model: embeddingModel,
     input: text,
   });
   const queryEmbedding = embeddingRes.data[0].embedding;

@@ -20,59 +20,45 @@ import {
   X,
 } from "lucide-react";
 import { ChatBubble } from "@/components/ui/ChatBubble";
+import { MarkdownMessage } from "@/components/ui/MarkdownMessage";
 import { labTheme } from "@/lib/theme";
-
-type ChatMessage = {
-  id: string;
-  from: "user" | "assistant" | "system";
-  text: string;
-  meta?: string;
-};
+import {
+  useRealtimeVoiceSession,
+  VoiceMessage,
+} from "@/lib/voice/useRealtimeVoiceSession";
 
 const START_CALL_PROMPT =
   "Arranca una conversación de voz amable y breve en español. Presentate y pregunta en qué puedes ayudar.";
 
 export default function MobileVoiceChat() {
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: "welcome",
-      from: "assistant",
-      text: "Hola, soy tu asistente. Toca el botón para empezar una llamada de voz.",
-    },
-  ]);
-  const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [wsConnected, setWsConnected] = useState(false);
-  const [callStatus, setCallStatus] = useState<"idle" | "calling" | "in_call">(
-    "idle"
-  );
+  const {
+    messages,
+    setMessages,
+    input,
+    setInput,
+    loading,
+    wsConnected,
+    callStatus,
+    inCall,
+    assistantTalking,
+    isRecording,
+    muted,
+    micMuted,
+    startCall,
+    endCall,
+    toggleSpeaker: voiceToggleSpeaker,
+    toggleMic: voiceToggleMic,
+    sendUserMessage,
+  } = useRealtimeVoiceSession({
+    startCallPrompt: START_CALL_PROMPT,
+    initialScope: "support",
+  });
+
   const [showMobileControls, setShowMobileControls] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showMobileSidebar, setShowMobileSidebar] = useState(false);
   const [showHeaderDivider, setShowHeaderDivider] = useState(false);
-  const [muted, setMuted] = useState(false);
-  const [micMuted, setMicMuted] = useState(false);
-  const [isRecording, setIsRecordingState] = useState(false);
-  const [assistantTalking, setAssistantTalking] = useState(false);
-
   const chatRef = useRef<HTMLDivElement | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
-  const recognitionRef = useRef<any>(null);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const currentAssistantTextRef = useRef("");
-  const pendingAssistantTextRef = useRef<string | null>(null);
-  const currentResponseIdRef = useRef<string | null>(null);
-  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const dropAssistantResponsesRef = useRef(false);
-  const introPromptTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const assistantPlaceholderRef = useRef(false);
-  const isRecordingRef = useRef(false);
-  const micMutedRef = useRef(false);
-  const assistantTalkingRef = useRef(false);
-  const inCallRef = useRef(false);
-  const mutedRef = useRef(false);
-
   const hasTypedInput = input.trim().length > 0;
   const handleCopy = async (text: string) => {
     try {
@@ -81,6 +67,56 @@ export default function MobileVoiceChat() {
       console.error("Copy failed:", err);
     }
   };
+
+  function speak(text: string) {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    // Only replay using the assistant's own Realtime voice
+    // when there is an active voice call.
+    if (callStatus !== "in_call") {
+      return;
+    }
+    const prompt = `Repite exactamente este mensaje en voz usando tu propia voz, sin añadir nada más:\n\n${trimmed}`;
+    void sendUserMessage(prompt, { silent: true });
+  }
+
+  // Ensure initial welcome message appears once
+  useEffect(() => {
+    setMessages((prev: VoiceMessage[]) =>
+      prev.length
+        ? prev
+        : [
+            {
+              id: "welcome",
+              from: "assistant",
+              text: "Hola, soy tu asistente. Toca el botón para empezar una llamada de voz.",
+            },
+          ]
+    );
+  }, [setMessages]);
+
+  function scrollToBottom() {
+    if (chatRef.current) {
+      chatRef.current.scrollTop = chatRef.current.scrollHeight;
+    }
+  }
+
+  function toggleSpeaker() {
+    voiceToggleSpeaker();
+  }
+
+  function toggleMic() {
+    voiceToggleMic();
+  }
+
+  const suggestions = useMemo(
+    () => [
+      "Dame un resumen rápido",
+      "Repregunta si necesitas detalles",
+      "Activa modo breve con respuestas de 2 frases",
+    ],
+    []
+  );
 
   useEffect(() => {
     scrollToBottom();
@@ -96,573 +132,6 @@ export default function MobileVoiceChat() {
       chatEl.removeEventListener("scroll", updateHeaderDivider);
     };
   }, [messages]);
-
-  useEffect(() => {
-    if (audioRef.current) {
-      audioRef.current.muted = muted;
-      audioRef.current.volume = muted ? 0 : 1;
-    }
-  }, [muted]);
-
-  useEffect(() => {
-    isRecordingRef.current = isRecording;
-  }, [isRecording]);
-
-  useEffect(() => {
-    micMutedRef.current = micMuted;
-    mutedRef.current = muted;
-    assistantTalkingRef.current = assistantTalking;
-  }, [micMuted, muted, assistantTalking]);
-
-  useEffect(() => {
-    return () => {
-      if (introPromptTimeoutRef.current) {
-        clearTimeout(introPromptTimeoutRef.current);
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    let didUnmount = false;
-
-    const scheduleReconnect = () => {
-      if (didUnmount || reconnectTimeoutRef.current) return;
-      reconnectTimeoutRef.current = setTimeout(() => {
-        reconnectTimeoutRef.current = null;
-        connect();
-      }, 1500);
-    };
-
-    const connect = () => {
-      if (didUnmount) return;
-      const ws = new WebSocket("ws://localhost:4001");
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        if (didUnmount) return;
-        setWsConnected(true);
-        pushSystem("Conectado al servidor en tiempo real", "online");
-      };
-
-      ws.onclose = () => {
-        if (didUnmount) return;
-        inCallRef.current = false;
-        setWsConnected(false);
-        pushSystem("Desconectado. Reintentando…", "warning");
-        setCallStatus("idle");
-        scheduleReconnect();
-      };
-
-      ws.onerror = () => {
-        if (didUnmount) return;
-        pushSystem("Error de WebSocket. Comprueba el servidor.", "error");
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-
-          if (data.type === "response.text.delta") {
-            const delta: string = data.delta ?? "";
-            if (!delta) return;
-            currentAssistantTextRef.current += delta;
-          }
-
-          if (data.type === "response.created") {
-            const id = data.response?.id || data.id;
-            if (id) {
-              currentResponseIdRef.current = id;
-            }
-          }
-
-          if (data.type === "response.text.done") {
-            const finalText = currentAssistantTextRef.current;
-            currentAssistantTextRef.current = "";
-            if (!finalText || dropAssistantResponsesRef.current) {
-              pendingAssistantTextRef.current = null;
-              setLoading(false);
-              return;
-            }
-            pendingAssistantTextRef.current = finalText;
-
-            const shouldSpeak =
-              inCallRef.current && !mutedRef.current && typeof data.text === "string";
-
-            if (shouldSpeak) {
-              void speak(data.text, () => flushPendingAssistantText(60));
-            } else {
-              flushPendingAssistantText(60);
-            }
-          }
-
-          if (data.type === "response.done") {
-            const finishedId = data.response?.id || data.id;
-            if (
-              finishedId &&
-              currentResponseIdRef.current &&
-              finishedId === currentResponseIdRef.current
-            ) {
-              currentResponseIdRef.current = null;
-            }
-            if (!pendingAssistantTextRef.current) {
-              setLoading(false);
-            }
-          }
-
-          if (
-            data.type === "error" ||
-            data.type === "response.error" ||
-            data.error
-          ) {
-            const message =
-              data?.error?.message ||
-              data?.message ||
-              "Error en respuesta (revisa logs)";
-            pushSystem(message, "error");
-            setLoading(false);
-          }
-        } catch (err) {
-          console.error("Parse error", err);
-          setLoading(false);
-        }
-      };
-    };
-
-    connect();
-
-    return () => {
-      didUnmount = true;
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-        reconnectTimeoutRef.current = null;
-      }
-      if (wsRef.current) {
-        wsRef.current.close();
-        wsRef.current = null;
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      console.warn("SpeechRecognition API no disponible");
-      return;
-    }
-
-    const recognition = new SpeechRecognition();
-    recognition.lang = "es-ES";
-    recognition.interimResults = false;
-    recognition.continuous = true;
-
-    recognition.onresult = (event: any) => {
-      if (micMutedRef.current) return;
-      const results = event.results;
-      const lastResult = results[results.length - 1];
-      const transcript = lastResult[0].transcript;
-      void sendUserMessage(transcript);
-    };
-
-    recognition.onerror = (event: any) => {
-      const error = event?.error;
-      if (error === "no-speech") {
-        console.warn("SpeechRecognition warning: no-speech");
-        return;
-      }
-      if (error === "network") {
-        console.warn("SpeechRecognition warning: network issue");
-        ensureMicActive();
-        return;
-      }
-      console.error("SpeechRecognition error:", error);
-      setIsRecordingState(false);
-    };
-
-    recognition.onend = () => {
-      if (micMutedRef.current || assistantTalkingRef.current || !inCallRef.current) {
-        setIsRecordingState(false);
-        return;
-      }
-      ensureMicActive();
-    };
-
-    recognitionRef.current = recognition;
-  }, []);
-
-  function ensureMicActive() {
-    const recognition = recognitionRef.current;
-    if (
-      !recognition ||
-      micMutedRef.current ||
-      !inCallRef.current ||
-      assistantTalkingRef.current ||
-      isRecordingRef.current
-    ) {
-      return;
-    }
-
-    try {
-      recognition.start();
-      setIsRecordingState(true);
-    } catch (err: any) {
-      if (err?.name === "InvalidStateError") {
-        setIsRecordingState(true);
-      } else {
-        console.error("Error starting recognition:", err);
-      }
-    }
-  }
-
-  async function speak(text: string, onSpeechStart?: () => void) {
-    if (!text.trim() || dropAssistantResponsesRef.current) return;
-
-    const recognition = recognitionRef.current;
-    if (recognition && isRecordingRef.current) {
-      assistantTalkingRef.current = true;
-      setAssistantTalking(true);
-      try {
-        recognition.stop();
-      } catch (err) {
-        console.error("Error stopping recognition before TTS:", err);
-      }
-      setIsRecordingState(false);
-    }
-
-    const triggerSpeechStart = (() => {
-      let triggered = false;
-      return () => {
-        if (triggered) return;
-        triggered = true;
-        onSpeechStart?.();
-      };
-    })();
-
-    try {
-      const res = await fetch("/api/tts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, voice: "alloy" }),
-      });
-
-      if (!res.ok) {
-        console.error("TTS error:", await res.text());
-        triggerSpeechStart();
-        return;
-      }
-
-      const arrayBuffer = await res.arrayBuffer();
-      const blob = new Blob([arrayBuffer], { type: "audio/mpeg" });
-      const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-      if (dropAssistantResponsesRef.current) {
-        triggerSpeechStart();
-        URL.revokeObjectURL(url);
-        return;
-      }
-      if (audioRef.current) {
-        audioRef.current.pause();
-      }
-      audioRef.current = audio;
-      audio.muted = mutedRef.current;
-      audio.volume = mutedRef.current ? 0 : 1;
-
-      if (!assistantTalkingRef.current) {
-        assistantTalkingRef.current = true;
-        setAssistantTalking(true);
-      }
-
-      const restartMic = () => {
-        setAssistantTalking(false);
-        assistantTalkingRef.current = false;
-        if (audioRef.current === audio) {
-          audioRef.current = null;
-        }
-        ensureMicActive();
-      };
-
-      audio.onended = restartMic;
-      audio.onerror = (err) => {
-        console.error("Playback error:", err);
-        triggerSpeechStart();
-        restartMic();
-      };
-
-      audio.onplay = triggerSpeechStart;
-
-      audio.play().catch((err) => {
-        console.error("Playback error:", err);
-        triggerSpeechStart();
-        restartMic();
-      });
-    } catch (err) {
-      console.error("TTS fetch error:", err);
-      triggerSpeechStart();
-      setAssistantTalking(false);
-      assistantTalkingRef.current = false;
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current = null;
-      }
-      ensureMicActive();
-    }
-  }
-
-  async function sendUserMessage(text: string, options?: { silent?: boolean }) {
-    const trimmed = text.trim();
-    if (
-      !trimmed ||
-      !wsRef.current ||
-      wsRef.current.readyState !== WebSocket.OPEN
-    ) {
-      return;
-    }
-
-    dropAssistantResponsesRef.current = false;
-
-    if (!options?.silent) {
-      setMessages((prev) => [
-        ...prev,
-        { id: crypto.randomUUID(), from: "user", text: trimmed },
-      ]);
-    }
-    setLoading(true);
-
-    wsRef.current.send(
-      JSON.stringify({
-        type: "user_message",
-        text: trimmed,
-        scope: "support",
-      })
-    );
-    setInput("");
-  }
-
-  function pushSystem(text: string, meta?: string) {
-    setMessages((prev) => [
-      ...prev,
-      { id: crypto.randomUUID(), from: "system", text, meta },
-    ]);
-  }
-
-  function ensureAssistantMessage() {
-    if (assistantPlaceholderRef.current) return;
-    assistantPlaceholderRef.current = true;
-    setMessages((prev) => [
-      ...prev,
-      { id: crypto.randomUUID(), from: "assistant", text: "" },
-    ]);
-  }
-
-  function setLastAssistantText(nextText: string) {
-    setMessages((prev) => {
-      const updated = [...prev];
-      for (let i = updated.length - 1; i >= 0; i -= 1) {
-        if (updated[i].from === "assistant") {
-          updated[i] = { ...updated[i], text: nextText };
-          return updated;
-        }
-      }
-      return [
-        ...updated,
-        { id: crypto.randomUUID(), from: "assistant", text: nextText },
-      ];
-    });
-  }
-
-  function stopTypingAnimation() {
-    if (typingTimeoutRef.current) {
-      clearTimeout(typingTimeoutRef.current);
-      typingTimeoutRef.current = null;
-    }
-    assistantPlaceholderRef.current = false;
-  }
-
-  function startAssistantTyping(fullText: string, initialDelay = 300) {
-    stopTypingAnimation();
-    if (!fullText) {
-      return;
-    }
-    ensureAssistantMessage();
-    setLastAssistantText("");
-    const baseOverhead = 400;
-    const perChar = 16;
-    const targetDuration = baseOverhead + perChar * fullText.length;
-    const delay = Math.max(
-      10,
-      Math.min(65, targetDuration / Math.max(1, fullText.length))
-    );
-    let index = 0;
-    const typeNext = () => {
-      setLastAssistantText(fullText.slice(0, index + 1));
-      index += 1;
-      if (index < fullText.length) {
-        typingTimeoutRef.current = setTimeout(typeNext, delay);
-      } else {
-        typingTimeoutRef.current = null;
-        assistantPlaceholderRef.current = false;
-      }
-    };
-    typingTimeoutRef.current = setTimeout(typeNext, Math.max(0, initialDelay));
-  }
-
-  function flushPendingAssistantText(delay = 120) {
-    const text = pendingAssistantTextRef.current;
-    if (!text) return;
-    if (dropAssistantResponsesRef.current) {
-      pendingAssistantTextRef.current = null;
-      setLoading(false);
-      return;
-    }
-    pendingAssistantTextRef.current = null;
-    startAssistantTyping(text, delay);
-    setLoading(false);
-  }
-
-  function startCall() {
-    if (!wsConnected) {
-      alert("Conecta primero con el servidor realtime");
-      return;
-    }
-    dropAssistantResponsesRef.current = false;
-    inCallRef.current = true;
-    setCallStatus("calling");
-    mutedRef.current = muted;
-    audioRef.current && (audioRef.current.muted = mutedRef.current);
-    pushSystem("Iniciando llamada…", "call");
-    ensureMicActive();
-    playCue("start");
-
-    if (introPromptTimeoutRef.current) {
-      clearTimeout(introPromptTimeoutRef.current);
-    }
-    introPromptTimeoutRef.current = setTimeout(() => {
-      if (!inCallRef.current) return;
-      setCallStatus("in_call");
-      pushSystem("Llamada activa", "success");
-      void sendUserMessage(START_CALL_PROMPT, { silent: true });
-    }, 400);
-  }
-
-  function endCall() {
-    inCallRef.current = false;
-    setCallStatus("idle");
-    setMuted(false);
-    mutedRef.current = false;
-    setMicMuted(false);
-    setAssistantTalking(false);
-    pendingAssistantTextRef.current = null;
-    currentAssistantTextRef.current = "";
-    stopTypingAnimation();
-    dropAssistantResponsesRef.current = true;
-    setLoading(false);
-    pushSystem("Llamada finalizada", "call");
-    playCue("end");
-
-    if (
-      currentResponseIdRef.current &&
-      wsRef.current &&
-      wsRef.current.readyState === WebSocket.OPEN
-    ) {
-      wsRef.current.send(
-        JSON.stringify({
-          type: "response.cancel",
-          response_id: currentResponseIdRef.current,
-        })
-      );
-      currentResponseIdRef.current = null;
-    }
-
-    const recognition = recognitionRef.current;
-    if (recognition && isRecordingRef.current) {
-      try {
-        recognition.stop();
-        setIsRecordingState(false);
-      } catch (err) {
-        console.error("Error stopping recognition:", err);
-      }
-    }
-
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current = null;
-    }
-    if (introPromptTimeoutRef.current) {
-      clearTimeout(introPromptTimeoutRef.current);
-      introPromptTimeoutRef.current = null;
-    }
-  }
-
-  function playCue(type: "start" | "end") {
-    try {
-      const AudioContext =
-        (window as any).AudioContext || (window as any).webkitAudioContext;
-      if (!AudioContext) return;
-      const ctx = new AudioContext();
-      const oscillator = ctx.createOscillator();
-      const gain = ctx.createGain();
-      oscillator.type = "sine";
-      oscillator.frequency.value = type === "start" ? 880 : 440;
-      gain.gain.value = 0.2;
-      oscillator.connect(gain);
-      gain.connect(ctx.destination);
-      oscillator.start();
-      oscillator.stop(ctx.currentTime + 0.2);
-      oscillator.onended = () => ctx.close();
-    } catch (err) {
-      console.warn("Audio cue failed:", err);
-    }
-  }
-
-  function scrollToBottom() {
-    if (chatRef.current) {
-      chatRef.current.scrollTop = chatRef.current.scrollHeight;
-    }
-  }
-
-  function toggleSpeaker() {
-    setMuted((prev) => {
-      const next = !prev;
-      mutedRef.current = next;
-      if (audioRef.current) {
-        audioRef.current.muted = next;
-        audioRef.current.volume = next ? 0 : 1;
-      }
-      return next;
-    });
-  }
-
-  function toggleMic() {
-    const recognition = recognitionRef.current;
-    setMicMuted((prev) => {
-      const next = !prev;
-      micMutedRef.current = next;
-      if (next) {
-        if (recognition && isRecordingRef.current) {
-          try {
-            recognition.stop();
-            setIsRecordingState(false);
-          } catch (err) {
-            console.error("Error stopping recognition on mic mute:", err);
-          }
-        }
-      } else {
-        ensureMicActive();
-      }
-      return next;
-    });
-  }
-
-  const suggestions = useMemo(
-    () => [
-      "Dame un resumen rápido",
-      "Repregunta si necesitas detalles",
-      "Activa modo breve con respuestas de 2 frases",
-    ],
-    []
-  );
 
   return (
     <main
@@ -818,11 +287,11 @@ export default function MobileVoiceChat() {
                   const isAssistant = message.from === "assistant";
                   const showActions = isAssistant && !loading;
                   const isLast = idx === messages.length - 1;
-                  return isAssistant ? (
-                    <div key={message.id} className="space-y-2 px-1">
-                      <p className="text-base leading-relaxed text-slate-100">
-                        {message.text}
-                      </p>
+                  // For assistant messages, render markdown content with actions.
+                  if (isAssistant) {
+                    return (
+                      <div key={message.id} className="space-y-2 px-1">
+                      <MarkdownMessage text={message.text} />
                       {showActions && (
                         <div
                           className="flex items-center gap-2"
@@ -842,12 +311,33 @@ export default function MobileVoiceChat() {
                             className="flex h-8 w-8 items-center justify-center rounded-full text-white/70 transition hover:bg-white/10 hover:text-white cursor-pointer"
                             title="Reproducir audio"
                           >
-                            <AudioLines className="h-4 w-4" />
+                            <Volume2 className="h-4 w-4" />
                           </button>
                         </div>
                       )}
                     </div>
-                  ) : (
+                    );
+                  }
+
+                  // For user/system messages, keep bubbles, but if it's a
+                  // pending user utterance placeholder ("…"), render a
+                  // breathing dot aligned to the user side instead of text.
+                  const isPendingUserUtterance =
+                    message.from === "user" && message.text === "…";
+
+                  if (isPendingUserUtterance) {
+                    return (
+                      <div
+                        key={message.id}
+                        className="flex justify-end px-1"
+                        aria-label="User is speaking"
+                      >
+                        <span className="h-3 w-3 animate-pulse rounded-full bg-sky-400 shadow-[0_0_12px_rgba(56,189,248,0.8)]" />
+                      </div>
+                    );
+                  }
+
+                  return (
                     <ChatBubble
                       key={message.id}
                       from={message.from}
@@ -888,7 +378,10 @@ export default function MobileVoiceChat() {
                     onKeyDown={(e) => {
                       if (e.key === "Enter") {
                         e.preventDefault();
-                        void sendUserMessage(input);
+                        if (input.trim()) {
+                          void sendUserMessage(input);
+                          setInput("");
+                        }
                       }
                     }}
                     disabled={!wsConnected}
@@ -897,6 +390,7 @@ export default function MobileVoiceChat() {
                     onClick={() => {
                       if (hasTypedInput) {
                         void sendUserMessage(input);
+                        setInput("");
                       } else {
                         if (callStatus === "calling") return;
                         if (callStatus === "in_call") {

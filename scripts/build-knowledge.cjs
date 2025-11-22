@@ -7,8 +7,8 @@ const OpenAI = require("openai");
 
 const KB_DIR = path.join(process.cwd(), "knowledge", "raw");
 const OUTPUT_DIR = path.join(process.cwd(), "knowledge");
-const ITEMS_FILE = path.join(OUTPUT_DIR, "knowledge-items.json");
-const VECTORS_FILE = path.join(OUTPUT_DIR, "knowledge-vectors.json");
+const ITEMS_FILE = path.join(OUTPUT_DIR, "items.json");
+const VECTORS_FILE = path.join(OUTPUT_DIR, "vectors.json");
 const TEXT_EXTENSIONS = new Set([".md", ".txt"]);
 
 const client = new OpenAI({
@@ -29,12 +29,12 @@ async function main() {
 
   ensureDir(OUTPUT_DIR);
   writeJson(ITEMS_FILE, items);
-  console.log(`✅ Saved knowledge-items.json with ${items.length} entries.`);
+  console.log(`✅ Saved items.json with ${items.length} entries.`);
 
   const vectors = await buildEmbeddings(items);
   writeJson(VECTORS_FILE, vectors);
   console.log(
-    `✅ Saved knowledge-vectors.json with ${vectors.length} embeddings.`
+    `✅ Saved vectors.json with ${vectors.length} embeddings.`
   );
 
   await maybeSyncVectorDb(vectors);
@@ -176,12 +176,15 @@ function validateItem(item) {
   };
 }
 
+const EMBEDDING_MODEL =
+  process.env.EMBEDDING_MODEL || "text-embedding-3-small";
+
 async function buildEmbeddings(items) {
   const vectors = [];
   for (const item of items) {
     console.log(`Embedding: ${item.id}`);
     const embeddingRes = await client.embeddings.create({
-      model: "text-embedding-3-small",
+      model: EMBEDDING_MODEL,
       input: item.text,
     });
 

@@ -3,8 +3,8 @@ require("dotenv").config();
 const WebSocket = require("ws");
 const OpenAI = require("openai");
 
-const assistantProfile = require("./config/assistant-profile.json");
-const sanitizationRules = require("./config/sanitization-rules.json");
+const profile = require("./config/profile.json");
+const sanitizationRules = require("./config/sanitize.json");
 const { tools } = require("./config/tools.json");
 const knowledgeItems = loadKnowledgeItems();
 
@@ -12,13 +12,13 @@ const knowledgeItems = loadKnowledgeItems();
 let knowledgeVectors = [];
 try {
   // Expected shape: [{ id, scope, tags, languages, text, embedding: number[] }, ...]
-  knowledgeVectors = require("./knowledge/knowledge-vectors.json");
+  knowledgeVectors = require("./knowledge/vectors.json");
   console.log(
-    `Loaded ${knowledgeVectors.length} knowledge vectors from knowledge/knowledge-vectors.json`
+    `Loaded ${knowledgeVectors.length} knowledge vectors from knowledge/vectors.json`
   );
 } catch (e) {
   console.error(
-    "Could not load knowledge/knowledge-vectors.json. RAG vector search will be disabled.",
+    "Could not load knowledge/vectors.json. RAG vector search will be disabled.",
     e.message || e
   );
 }
@@ -34,8 +34,12 @@ for (const item of knowledgeVectors) {
 }
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const OPENAI_REALTIME_URL =
-  "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview"; // adjust if you target a different release
+const REALTIME_MODEL =
+  process.env.REALTIME_MODEL || "gpt-4o-mini-realtime-preview";
+const REALTIME_MODEL_PREMIUM =
+  process.env.REALTIME_MODEL_PREMIUM || "gpt-4o-realtime-preview";
+const REALTIME_VOICE = process.env.REALTIME_VOICE || "alloy";
+const OPENAI_REALTIME_URL = `wss://api.openai.com/v1/realtime?model=${REALTIME_MODEL}`;
 const PORT = process.env.REALTIME_PORT || 4001;
 
 const VECTOR_CONTEXT = {
@@ -58,7 +62,7 @@ const openai = new OpenAI({
   apiKey: OPENAI_API_KEY,
 });
 
-const sessionInstructions = buildSessionInstructions(assistantProfile);
+const sessionInstructions = buildSessionInstructions(profile);
 const compiledSanitizeRules = compileSanitizationRules(sanitizationRules);
 const toolDefinitions = Array.isArray(tools) ? tools : [];
 const toolMap = new Map(toolDefinitions.map((tool) => [tool.name, tool]));
@@ -171,6 +175,9 @@ function cosineSimilarity(a, b) {
  * - Computes cosine similarity against each entry.
  * - Returns the top-K concatenated while respecting a max length.
  */
+const EMBEDDING_MODEL =
+  process.env.EMBEDDING_MODEL || "text-embedding-3-small";
+
 async function buildVectorContext(question, options = {}) {
   if (!knowledgeVectors.length && !useVectorDb) return "";
 
@@ -179,7 +186,7 @@ async function buildVectorContext(question, options = {}) {
 
   // 1) Embed the question
   const embeddingRes = await openai.embeddings.create({
-    model: "text-embedding-3-small",
+    model: EMBEDDING_MODEL,
     input: question,
   });
 
@@ -289,10 +296,10 @@ async function fetchJson(url, options) {
 
 function loadKnowledgeItems() {
   try {
-    return require("./knowledge/knowledge-items.json");
+    return require("./knowledge/items.json");
   } catch (err) {
     if (err.code !== "MODULE_NOT_FOUND") {
-      console.error("Could not load knowledge/knowledge-items.json:", err);
+      console.error("Could not load knowledge/items.json:", err);
     }
     return [];
   }
@@ -337,6 +344,15 @@ async function handleToolCall(openAiSocket, clientSocket, toolCall) {
     const toolMeta = toolMap.get(toolName);
     if (!toolMeta) {
       outputPayload = { error: `Unknown tool: ${toolName}` };
+    } else if (toolMeta.kind === "session") {
+      // Session/UI tools are handled locally (no external API),
+      // based on their JSON specification (ui_command, session_update, etc.).
+      outputPayload = await handleSessionToolCommand(
+        openAiSocket,
+        clientSocket,
+        toolMeta,
+        args
+      );
     } else if (toolMeta.routes && externalApiConfig.baseUrl) {
       outputPayload = await callExternalApi(toolMeta.routes, args);
     } else {
@@ -484,6 +500,20 @@ function sendToolLog(clientSocket, payload) {
   }
 }
 
+function sendUiCommand(clientSocket, command, args) {
+  try {
+    const message = {
+      type: "ui.command",
+      command,
+      args,
+      timestamp: new Date().toISOString(),
+    };
+    clientSocket.send(JSON.stringify(message));
+  } catch (err) {
+    console.error("Failed to send UI command to client:", err);
+  }
+}
+
 function simulateToolResponse(toolName, args) {
   switch (toolName) {
     case "lookup_booking":
@@ -495,6 +525,46 @@ function simulateToolResponse(toolName, args) {
         message: `No simulation defined for ${toolName}.`,
       };
   }
+}
+
+async function handleSessionToolCommand(openAiSocket, clientSocket, toolMeta, args) {
+  const name = String(toolMeta.name || "unknown_session_tool");
+  const uiCommand = toolMeta.ui_command || name;
+
+  // Forward a UI command to the client. The client decides how to
+  // interpret and act on it (end_call, mute_speaker, etc.).
+  sendUiCommand(clientSocket, uiCommand, args || {});
+
+  // Optional: apply session updates based on the tool spec.
+  const sessionUpdate = toolMeta.session_update || {};
+  if (sessionUpdate && typeof sessionUpdate === "object") {
+    // Example: set_voice tool uses { "voiceParam": "voice" }
+    if (sessionUpdate.voiceParam) {
+      const paramName = String(sessionUpdate.voiceParam);
+      const voice =
+        typeof args?.[paramName] === "string" && args[paramName].trim()
+          ? args[paramName].trim()
+          : null;
+      if (voice) {
+        try {
+          openAiSocket.send(
+            JSON.stringify({
+              type: "session.update",
+              session: {
+                voice,
+              },
+            })
+          );
+        } catch (err) {
+          console.error("Failed to update Realtime voice:", err);
+          return { error: "Failed to update voice" };
+        }
+        return { status: "ok", voice };
+      }
+    }
+  }
+
+  return { status: "ok" };
 }
 
 function simulateBookingLookup(args) {
@@ -542,6 +612,7 @@ wss.on("connection", (clientSocket) => {
   console.log("Client connected to realtime WS");
 
   const pendingFunctionCalls = new Map();
+  let hasPendingInputAudio = false;
 
   const openAiSocket = new WebSocket(OPENAI_REALTIME_URL, {
     headers: {
@@ -557,8 +628,16 @@ wss.on("connection", (clientSocket) => {
     const sessionUpdate = {
       type: "session.update",
       session: {
-        modalities: ["text"],
+        // Enable both text and audio so the same session can
+        // handle speech-to-speech conversations end-to-end.
+        modalities: ["text", "audio"],
         instructions: sessionInstructions,
+        input_audio_format: "pcm16",
+        output_audio_format: "pcm16",
+        turn_detection: {
+          type: "server_vad",
+        },
+        voice: REALTIME_VOICE,
         tools: openAITools.length ? openAITools : undefined,
       },
     };
@@ -566,7 +645,7 @@ wss.on("connection", (clientSocket) => {
     openAiSocket.send(JSON.stringify(sessionUpdate));
   });
 
-  // Messages from OpenAI → client (with sanitization)
+  // Messages from OpenAI → client (text + optional audio)
   openAiSocket.on("message", (data) => {
     const raw = typeof data === "string" ? data : data.toString("utf8");
     let parsed;
@@ -600,6 +679,23 @@ wss.on("connection", (clientSocket) => {
 
     if (parsed.type === "error") {
       console.error("OpenAI session error payload:", parsed.error || parsed);
+    }
+
+    // Forward audio deltas as raw PCM16 to the client as binary frames.
+    // The frontend can pipe these into an AudioContext for playback.
+    if (
+      parsed.type === "response.audio.delta" &&
+      typeof parsed.delta === "string" &&
+      parsed.delta.length > 0
+    ) {
+      try {
+        const audioBuffer = Buffer.from(parsed.delta, "base64");
+        if (audioBuffer.length > 0) {
+          clientSocket.send(audioBuffer);
+        }
+      } catch (err) {
+        console.error("Failed to decode audio delta:", err);
+      }
     }
 
     if (
@@ -679,10 +775,11 @@ wss.on("connection", (clientSocket) => {
     clientSocket.close();
   });
 
-  // Messages from the client → OpenAI (with vector RAG context)
+  // Messages from the client → OpenAI (RAG; audio-in disabled for now)
   clientSocket.on("message", async (data) => {
     try {
-      const msg = JSON.parse(data.toString());
+      const raw = typeof data === "string" ? data : data.toString("utf8");
+      const msg = JSON.parse(raw);
       console.log("FROM CLIENT:", msg);
 
       if (msg.type === "user_message") {
@@ -727,6 +824,39 @@ wss.on("connection", (clientSocket) => {
           type: "response.create",
         };
         openAiSocket.send(JSON.stringify(responseCreate));
+      }
+
+      if (msg.type === "client.audio.chunk" && typeof msg.audio === "string") {
+        if (openAiSocket.readyState === WebSocket.OPEN && msg.audio.length > 0) {
+          openAiSocket.send(
+            JSON.stringify({
+              type: "input_audio_buffer.append",
+              audio: msg.audio,
+            })
+          );
+          hasPendingInputAudio = true;
+        }
+      }
+
+      // Control messages from the client to manage audio turns.
+      if (msg.type === "client.audio.start") {
+        if (openAiSocket.readyState === WebSocket.OPEN) {
+          // Clear any previous audio buffer state on the server side.
+          openAiSocket.send(
+            JSON.stringify({
+              type: "input_audio_buffer.clear",
+            })
+          );
+          hasPendingInputAudio = false;
+        }
+      }
+
+      if (msg.type === "client.audio.stop") {
+        // With server_vad turn detection enabled, we don't need to force
+        // a commit when the client stops streaming. The model will detect
+        // turn boundaries from the audio directly. Avoid committing an
+        // effectively empty buffer which causes input_audio_buffer_commit_empty.
+        hasPendingInputAudio = false;
       }
     } catch (e) {
       console.error("Error parsing message from client:", e);

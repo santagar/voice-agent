@@ -2,6 +2,7 @@
   "tools": [
     {
       "name": "lookup_booking",
+      "kind": "business",
       "description": "Fetch the status and summary of a booking given its locator or internal reference.",
       "parameters": {
         "type": "object",
@@ -24,6 +25,7 @@
     },
     {
       "name": "check_availability",
+      "kind": "business",
       "description": "Checks availability for an activity or product on a given date range.",
       "parameters": {
         "type": "object",
@@ -46,6 +48,80 @@
       "routes": {
         "method": "POST",
         "path": "/api/tools/products/check-availability"
+      }
+    },
+    {
+      "name": "end_call",
+      "kind": "session",
+      "ui_command": "end_call",
+      "description": "Ends the current voice call/session when the user explicitly asks to hang up or finish the conversation.",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "name": "mute_speaker",
+      "kind": "session",
+      "ui_command": "mute_speaker",
+      "description": "Mutes the assistant audio output so the user stops hearing the voice without ending the call.",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "name": "unmute_speaker",
+      "kind": "session",
+      "ui_command": "unmute_speaker",
+      "description": "Unmutes the assistant audio output so the user can hear the voice again.",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "name": "mute_mic",
+      "kind": "session",
+      "ui_command": "mute_mic",
+      "description": "Mutes the user microphone so their audio is not streamed to the assistant.",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "name": "unmute_mic",
+      "kind": "session",
+      "ui_command": "unmute_mic",
+      "description": "Unmutes the user microphone so their audio is streamed to the assistant again.",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "name": "set_voice",
+      "kind": "session",
+      "ui_command": "set_voice",
+      "session_update": {
+        "voiceParam": "voice"
+      },
+      "description": "Changes the Realtime voice used for audio responses for this session (for example: alloy, verse, ballad, coral, echo, ash).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "voice": {
+            "type": "string",
+            "description": "Target voice name (e.g., alloy, verse, ballad, coral, echo, ash)."
+          }
+        },
+        "required": ["voice"]
       }
     }
   ]
