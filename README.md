@@ -37,6 +37,195 @@ The easiest way to deploy your Next.js app is to use the [Vercel Platform](https
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
 
+# 🧠 Architecture Overview
+
+This repo implements a **Realtime voice assistant** on top of Next.js with a small Node “bridge” that manages the OpenAI Realtime session, RAG, and tools. The system is intentionally split into a few clear layers:
+
+```text
+User (mic / speakers)
+   ↓ (WebRTC / WS, PCM16 audio)
+Next.js frontend (React + hook)
+   ↓
+Realtime bridge (realtime/server.ts → dist/realtime/server.js)
+   ↓ (OpenAI Realtime: gpt-4o-mini-realtime-preview)
+RAG (Pinecone and/or local JSON vectors)
+   ↓
+Realtime bridge
+   ↓ (audio PCM16 + transcript + tool events)
+Next.js frontend (chat UI + AudioContext)
+```
+
+## Components
+
+- **Next.js app (`app/*`)**
+  - `/chat`: main chat + voice view (MVP).
+  - `/assistant`: baseline demo view (optional).
+  - `/api/*`: HTTP endpoints for tools, scopes, STT, and intent classification.
+
+- **Shared voice hook (`lib/voice/useRealtimeVoiceSession.ts`)**
+  - Owns the client WebSocket to the bridge (`ws://localhost:4001`).
+  - Captures microphone audio (`getUserMedia`), downsamples to 24 kHz PCM16 and streams it over WS.
+  - Maintains VAD and barge‑in on the client:
+    - Uses RMS + a dynamic noise floor to decide when the user is speaking.
+    - Groups audio into utterances, shows a “breathing dot” while the user talks.
+    - Can interrupt the assistant’s audio quickly when the user speaks over it.
+  - For each utterance:
+    - Sends audio to `/api/transcribe` to obtain text (using `TRANSCRIPTION_MODEL`).
+    - Passes the text to `/api/voice-intent` to decide `USER_TURN` vs `IGNORE`.
+    - If accepted, updates chat (`messages`), adjusts scope (`/api/scopes`), and lets the Realtime session continue the dialogue.
+  - Renders:
+    - user messages (typed or transcribed),
+    - assistant messages (from `response.audio_transcript.*`),
+    - system messages (tools, scopes, errors).
+
+- **Realtime bridge (`realtime/server.ts` → `dist/realtime/server.js`)**
+  - Node WebSocket server that lives outside Next.js (run via `npm run realtime`).
+  - Accepts WS connections from the frontend and opens a matching WS to OpenAI Realtime:
+    - Configured with `REALTIME_MODEL` (default `gpt-4o-mini-realtime-preview`).
+    - Enables `modalities: ["text", "audio"]`.
+    - Uses `turn_detection: { type: "server_vad" }` for server‑side turn detection.
+    - Configures `input_audio_format: "pcm16"`, `output_audio_format: "pcm16"`.
+  - Loads configuration at startup:
+    - `config/profile.json` → identity, tone, answer, tool, escalation, safety rules.
+    - `config/sanitize.json` → regex rules applied to assistant text before sending to the client.
+    - `config/tools.json` → metadata for business tools (`lookup_booking`, `check_availability`) and session tools (`end_call`, `mute_speaker`, `set_voice`, etc.).
+    - `knowledge/items.json` + `knowledge/vectors.json` → precomputed KB for RAG.
+  - Bridges messages:
+    - From client:
+      - `user_message` (typed text) → enrich with RAG context and send as `conversation.item.create` + `response.create`.
+      - `client.audio.start` / `client.audio.chunk` / `client.audio.stop` → forward audio to the Realtime input buffer, optionally gated by server‑side VAD.
+    - From Realtime:
+      - `response.audio.delta` → base64 PCM16 → binary WS frame to the client.
+      - `response.audio_transcript.*` → assistant transcripts for the chat UI.
+      - tool calls (`required_action`) → handled via local `config/tools.json` and forwarded to:
+        - `/api/tools/*` for business tools, or
+        - `ui.command` for session tools (end call, mute speaker, etc.).
+      - errors → forwarded as system messages to the frontend.
+
+- **Tools and business APIs**
+  - `config/tools.json` describes tools declaratively:
+    - `name`, `description`, `parameters` (JSON Schema for arguments).
+    - `kind`: `"business"` vs `"session"`.
+    - `routes` (for business tools): HTTP method + path template under `/api/tools/*` or an external backend.
+    - `ui_command` (for session tools): command name consumed by `useRealtimeVoiceSession` (e.g., `"end_call"`, `"mute_speaker"`).
+    - `session_update` (optional): declarative mapping to update Realtime session settings (e.g., changing the voice).
+  - Example business endpoints:
+    - `app/api/tools/bookings/[locator]/route.ts` → mock booking lookup.
+    - `app/api/tools/products/check-availability/route.ts` → mock availability.
+
+- **Knowledge base / RAG**
+  - `knowledge/items.json`: human‑readable snippets with metadata: `id`, `scope`, `tags`, `languages`, `text`.
+  - `knowledge/vectors.json`: same entries with precomputed embeddings.
+  - The bridge uses `EMBEDDING_MODEL` (default `text-embedding-3-small`) to embed each user question and:
+    - Queries Pinecone (`PINECONE_*` envs) when configured, or
+    - Falls back to a local in‑memory cosine similarity over `knowledge/vectors.json`.
+  - Selected snippets are prepended as internal context to each user text turn; they are not read verbatim to the user.
+
+- **Auxiliary APIs**
+  - `app/api/transcribe/route.ts`:
+    - Accepts base64 PCM16 24 kHz audio.
+    - Wraps it into WAV and calls `audio.transcriptions` with `TRANSCRIPTION_MODEL` (`gpt-4o-mini-transcribe`).
+    - Used only for user utterances (STT → text).
+  - `app/api/voice-intent/route.ts`:
+    - Accepts `{ text }`.
+    - Uses `INTENT_MODEL` (`gpt-4o-mini`) to classify into `USER_TURN` vs `IGNORE`.
+    - Drives whether a voice segment becomes a real user message or is dropped as noise.
+  - `app/api/scopes/route.ts`:
+    - POST: takes `{ text }`, returns a `scope` inferred via vectors + fallback rules.
+    - Used to keep the conversation in the right KB “bucket”.
+
+## Communication Flows
+
+### Voice turn (user talking)
+
+1. **Capture & VAD (frontend)**
+   - Microphone audio → `useRealtimeVoiceSession` → RMS + noise floor.
+   - If above threshold:
+     - start/continue utterance,
+     - show breathing dot (`"…"` message),
+     - stream PCM16 chunks to the bridge over WebSocket.
+2. **Realtime “brain”**
+   - The bridge forwards audio as `input_audio_buffer.append`.
+   - Realtime uses `server_vad` to detect turn boundaries and reason over the audio.
+3. **User STT + intent (frontend)**
+   - When VAD client detect silence:
+     - merge utterance chunks into a single PCM16 buffer,
+     - send to `/api/transcribe` → STT text,
+     - filter fillers (`mmm`, `eh`, `shh`, etc.),
+     - optionally call `/api/voice-intent`:
+       - When the assistant is speaking or the utterance is a short single word.
+       - `IGNORE` → remove dot and drop the utterance.
+       - `USER_TURN` → treat as a normal user message.
+   - Accepted utterances:
+     - get a user bubble in the chat,
+     - update `currentScope` via `/api/scopes`,
+     - and implicitly guide the ongoing Realtime session (which has already heard the audio).
+4. **Assistant response**
+   - Realtime returns:
+     - `response.audio.delta` → audio output.
+     - `response.audio_transcript.delta/done` → textual transcript of the assistant’s own speech.
+   - The bridge forwards both.
+   - The frontend:
+     - plays audio via `AudioContext`,
+     - types out the transcript as assistant chat bubbles (unless we are dropping that response because it belonged to an interrupted turn).
+
+### Barge‑in and noise handling
+
+- **Fast barge‑in** (audio‑level, client‑side):
+  - While the assistant is speaking, if the user voice stays above the dynamic VAD threshold for at least `BARGE_IN_MIN_MS` and `>= MIN_UTTERANCE_SAMPLES * 2` samples:
+    - `interruptAssistant()` cancels the current Realtime response, stops audio, and prepares a fresh turn.
+- **Semantic filter** (text‑level, server‑side):
+  - After STT, `/api/voice-intent` decides whether the utterance is an intentional turn (`USER_TURN`) or just noise (`IGNORE`).
+  - Only `USER_TURN` utterances become chat messages and influence scopes/tools. `IGNORE` utterances clear the breathing dot and do not affect the conversation.
+- **RNNoise (server‑side VAD)**
+  - The bridge uses RNNoise via `@jitsi/rnnoise-wasm` when `INPUT_VAD_ENABLED=true` to further gate input audio chunks before they reach Realtime.
+  - This is an additional noise gate; the primary UX logic lives in the client hook and Realtime’s own `server_vad`.
+
+## Environment Variables Summary
+
+Core:
+
+- `OPENAI_API_KEY` – OpenAI API key used by both the bridge and Next.js API routes.
+
+Realtime (voice + reasoning):
+
+- `REALTIME_PORT` – WebSocket port for the local bridge (default `4001`).
+- `REALTIME_MODEL` – primary Realtime model (default `gpt-4o-mini-realtime-preview`).
+- `REALTIME_MODEL_PREMIUM` – optional premium variant (default `gpt-4o-realtime-preview`).
+- `REALTIME_VOICE` – Realtime voice for assistant audio (e.g., `alloy`, `verse`, `ballad`).
+
+Embeddings / RAG:
+
+- `EMBEDDING_MODEL` – embedding model for KB + scopes (default `text-embedding-3-small`).
+- `PINECONE_API_KEY`, `PINECONE_INDEX_HOST`, `PINECONE_NAMESPACE`, `PINECONE_TOP_K` – Pinecone settings (optional; when absent, the bridge uses only local `knowledge/vectors.json`).
+
+User STT + intent:
+
+- `TRANSCRIPTION_MODEL` – model for `/api/transcribe` (default `gpt-4o-mini-transcribe`).
+- `INTENT_MODEL` – model for `/api/voice-intent` (default `gpt-4o-mini`).
+
+Server‑side VAD (bridge):
+
+- `INPUT_VAD_ENABLED` – `true` to enable RNNoise‑based gating in the bridge, `false` to forward all audio.
+- `INPUT_VAD_MIN_FRAMES` – minimum number of VAD‑positive frames required in a chunk.
+- `INPUT_VAD_MIN_SPEECH_FRACTION` – minimum fraction of frames that must be speech in a chunk.
+
+Frontend tuning:
+
+- `NEXT_PUBLIC_ASSISTANT_PLAYBACK_RATE` – playback rate for assistant audio (e.g., `1.05`).
+- `NEXT_PUBLIC_VAD_VOICE_THRESHOLD` – base RMS threshold for local VAD.
+- `NEXT_PUBLIC_VAD_SILENCE_MS` – silence duration to close a user utterance.
+- `NEXT_PUBLIC_VAD_NOISE_FACTOR` – multiplier over the noise floor to adjust sensitivity.
+- `NEXT_PUBLIC_BARGE_IN_MIN_MS` – minimum ms of continuous voice before barge‑in kicks in.
+- `NEXT_PUBLIC_USE_VOICE_TRANSCRIBE` – when set to `"false"`, runs in “pure voice” mode: user voice utterances are not sent to `/api/transcribe` or `/api/voice-intent`, and no user chat bubbles are created from voice; Realtime still consumes audio directly via the bridge and handles reasoning + tools.
+
+External APIs for business tools:
+
+- `TOOL_API_BASE_URL` – base URL for tool HTTP calls (default `http://localhost:3000`).
+- `CORE_API_TOKEN` – optional Bearer token for securing tool calls.
+
+All of these are documented in `.env.example`; copy it to `.env` and adjust as needed before running the system.
+
 # 🧠 How the Assistant Pipeline Works (Realtime Audio)
 
 This project is evolving toward a **full speech-to-speech** pipeline built on **OpenAI Realtime**. The Realtime model handles both reasoning and speech, while the vector KB provides context (RAG).
@@ -48,7 +237,7 @@ User (microphone)
    ↓ (WebRTC/WS audio)
 Next.js frontend (AudioClient)
    ↓
-Realtime Bridge (realtime-server.js)
+Realtime Bridge (realtime/server.ts → dist/realtime/server.js)
    ↓ (OpenAI Realtime: gpt-4o-mini-realtime-preview)
 RAG (Pinecone / JSON)
    ↓
@@ -87,7 +276,7 @@ const sessionUpdate = {
 };
 ```
 
-On the client side, the lab view (`/lab`) uses an `AudioClient`-style pattern:
+On the client side, the chat view uses an `AudioClient`-style pattern:
 
 - Captures microphone audio via `getUserMedia`.
 - Encodes it as PCM16 and streams it over WebSocket to `realtime-server.js`.
@@ -107,7 +296,7 @@ For audio-only turns, the Realtime model itself transcribes the speech internall
 
 ## 3. TTS HTTP = *Legacy / Fallback Path*
 
-There is still a legacy HTTP TTS endpoint used by older views (`/chat` and parts of `/lab`):
+There is still a legacy HTTP TTS endpoint used by older views (`/chat` in earlier iterations):
 
 ```ts
 await client.audio.speech.create({
@@ -138,7 +327,7 @@ Behavioral instructions belong to **Realtime**, not TTS. Put style, safety, and 
 
 ```text
 User (mic) → WebRTC/WS audio
-  → Next.js frontend (`/lab` AudioClient)
+  → Next.js frontend (AudioClient in the chat view)
   → websocket: ws://localhost:${REALTIME_PORT}
   → realtime-server.js
   → OpenAI Realtime (`REALTIME_MODEL` with text+audio)
@@ -350,7 +539,7 @@ This lets you benefit from Pinecone’s ANN search while keeping the local JSON 
    - `REALTIME_VOICE` – voice used by the Realtime audio responses (`alloy` by default, can be `ash`, `ballad`, `coral`, `echo`, `verse`, etc.).
    - `EMBEDDING_MODEL` – used for KB ingestion, RAG, and scope detection (`text-embedding-3-small` by default).
    - `TRANSCRIPTION_MODEL` – used by `/api/transcribe` for server-side STT of user audio (`gpt-4o-mini-transcribe` by default).
-4. Frontend audio tuning (lab view):
+4. Frontend audio tuning:
    - `NEXT_PUBLIC_ASSISTANT_PLAYBACK_RATE` – playback speed for assistant audio (default `1.05`; `1.0` = neutral).
    - `NEXT_PUBLIC_VAD_VOICE_THRESHOLD` – minimum RMS energy treated as voice (default `0.008`).
    - `NEXT_PUBLIC_VAD_SILENCE_MS` – silence duration in ms to close a user utterance (default `500`).
@@ -384,11 +573,11 @@ Use two terminals:
 # Terminal A – Realtime bridge (WS + tools + KB)
 npm run realtime
 
-# Terminal B – Next.js app (/assistant, /lab, API routes)
+# Terminal B – Next.js app (/assistant, /chat, API routes)
 npm run dev
 ```
 
-Or use the convenience script `npm run dev:all` (spawns both via `concurrently`). Visit `/assistant` for the baseline UI or `/lab` for the advanced call lab. Keep the realtime server running whenever the UI needs to stream through OpenAI.
+Or use the convenience script `npm run dev:all` (spawns both via `concurrently`). Visit `/assistant` for the baseline UI or `/chat` for the main voice/chat experience. Keep the realtime server running whenever the UI needs to stream through OpenAI.
 
 ### Production deployment notes
 
@@ -399,7 +588,7 @@ Or use the convenience script `npm run dev:all` (spawns both via `concurrently`)
   1. Commit KB changes and rerun `npm run build:kb`.
   2. Verify Pinecone synchronization (check logs for “Syncing … vectors”).
   3. Smoke-test `npm run dev:all` locally to confirm tools, speech, and KB lookups behave as expected.
-- Monitor both processes: logs from `/lab` should show tool usage, while `realtime-server.js` logs every OpenAI event to help debug failures.
+- Monitor both processes: logs from `/chat` (and the debug panel) show tool usage and scopes, while `realtime/server.ts` logs every OpenAI event to help debug failures.
 
 Following the checklist above keeps deployment repeatable and documents the requirements (OpenAI credentials, Pinecone index, tool endpoints) for anyone onboarding to the project.
 

@@ -13,7 +13,7 @@ type CardProps = {
 
 const toneClasses: Record<CardTone, string> = {
   frosted: "border-white/10 bg-white/[0.04]",
-  subtle: "border-white/10 bg-slate-900/60",
+  subtle: "border-white/10 bg-neutral-900/60",
   muted: "border-white/5 bg-black/40",
 };
 

@@ -44,6 +44,15 @@ const BARGE_IN_MIN_MS = Number(
   process.env.NEXT_PUBLIC_BARGE_IN_MIN_MS ?? "220"
 );
 
+// When false, the assistant runs in "pure voice" mode:
+// - user voice utterances are not sent through /api/transcribe
+//   or /api/voice-intent
+// - no user chat bubbles are created from voice
+// - Realtime still consumes audio directly via the bridge
+//   and handles reasoning + tools.
+const USE_VOICE_TRANSCRIBE =
+  process.env.NEXT_PUBLIC_USE_VOICE_TRANSCRIBE !== "false";
+
 // Minimum number of PCM16 samples required to treat a detected
 // voice segment as a real utterance to transcribe. At 24kHz,
 // 2400 samples ≈ 100ms of audio.
@@ -104,6 +113,7 @@ export function useRealtimeVoiceSession(
   const introPromptTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastUserTurnAtRef = useRef<number | null>(null);
+  const wsConnectedRef = useRef(false);
 
   const scopeCatalog = useMemo(() => {
     const merged = new Map<string, Set<string>>();
@@ -155,6 +165,10 @@ export function useRealtimeVoiceSession(
   useEffect(() => {
     inCallRef.current = inCall;
   }, [inCall]);
+
+  useEffect(() => {
+    wsConnectedRef.current = wsConnected;
+  }, [wsConnected]);
 
   useEffect(() => {
     async function loadScopes() {
@@ -373,12 +387,12 @@ export function useRealtimeVoiceSession(
 
       const duringAssistant = Boolean(options?.duringAssistant);
 
-      // For short, single-word utterances or barge-in scenarios
-      // (assistant currently speaking), ask a lightweight classifier
-      // whether this should be treated as a real user turn or noise.
+      // For text/voice-hybrid mode (USE_VOICE_TRANSCRIBE=true), use
+      // the intent classifier to decide whether this utterance should
+      // become a real user turn or be ignored as noise.
       const isShortSingleWord =
         !transcript.includes(" ") && transcript.length <= 12;
-      if (duringAssistant || isShortSingleWord) {
+      if (USE_VOICE_TRANSCRIBE && (duringAssistant || isShortSingleWord)) {
         try {
           const intentRes = await fetch("/api/voice-intent", {
             method: "POST",
@@ -449,25 +463,37 @@ export function useRealtimeVoiceSession(
       lastUserTurnAtRef.current = nowTs;
 
       const nextScope = await autoDetectScope(transcript);
-      if (messageId) {
-        setMessages((prev) => {
-          const updated = [...prev];
-          for (let i = updated.length - 1; i >= 0; i -= 1) {
-            if (updated[i].id === messageId) {
-              updated[i] = { ...updated[i], text: transcript };
-              return updated;
+
+      if (USE_VOICE_TRANSCRIBE) {
+        // Full voice+text mode: update or create the user bubble with
+        // the transcribed utterance.
+        if (messageId) {
+          setMessages((prev) => {
+            const updated = [...prev];
+            for (let i = updated.length - 1; i >= 0; i -= 1) {
+              if (updated[i].id === messageId) {
+                updated[i] = { ...updated[i], text: transcript };
+                return updated;
+              }
             }
-          }
-          return [
-            ...updated,
+            return [
+              ...updated,
+              { id: crypto.randomUUID(), from: "user", text: transcript },
+            ];
+          });
+        } else {
+          setMessages((prev) => [
+            ...prev,
             { id: crypto.randomUUID(), from: "user", text: transcript },
-          ];
-        });
-      } else {
-        setMessages((prev) => [
-          ...prev,
-          { id: crypto.randomUUID(), from: "user", text: transcript },
-        ]);
+          ]);
+        }
+      } else if (messageId) {
+        // Pure voice mode: remove the breathing-dot placeholder but do
+        // not create a text bubble for the user utterance. Scope still
+        // gets updated from STT above.
+        setMessages((prev) =>
+          prev.filter((msg) => msg.id !== messageId)
+        );
       }
       if (nextScope && nextScope !== currentScope) {
         setCurrentScope(nextScope);
@@ -625,7 +651,9 @@ export function useRealtimeVoiceSession(
             (sum, c) => sum + c.length,
             0
           );
-          const minBargeInSamples = MIN_UTTERANCE_SAMPLES * 2;
+          const minBargeInSamples = USE_VOICE_TRANSCRIBE
+            ? MIN_UTTERANCE_SAMPLES * 2
+            : MIN_UTTERANCE_SAMPLES;
           if (
             elapsedMs >= BARGE_IN_MIN_MS &&
             totalSamples >= minBargeInSamples
@@ -860,8 +888,15 @@ export function useRealtimeVoiceSession(
 
       ws.onerror = (err) => {
         if (didUnmount) return;
-        console.error("WS error:", err);
-        pushSystem("WebSocket error, check console", "error");
+        // On initial connection failures, log a warning and let the
+        // reconnect logic handle it silently. Only surface an error
+        // in the chat if the socket was previously connected.
+        if (wsConnectedRef.current) {
+          console.error("WS error:", err);
+          pushSystem("WebSocket error, check console", "error");
+        } else {
+          console.warn("WS connection failed, will retry…", err);
+        }
         try {
           ws.close();
         } catch {
@@ -920,6 +955,14 @@ export function useRealtimeVoiceSession(
             const id = data.response?.id || data.id;
             if (id) {
               currentResponseIdRef.current = id;
+            }
+            // In pure voice mode we always want to render the next
+            // assistant response, even if a previous one was
+            // interrupted. Reset drop flags whenever a fresh
+            // response is created.
+            if (!USE_VOICE_TRANSCRIBE) {
+              dropAssistantResponsesRef.current = false;
+              dropAssistantAudioRef.current = false;
             }
             currentAssistantTextRef.current = "";
             pendingAssistantTextRef.current = null;
@@ -994,6 +1037,9 @@ export function useRealtimeVoiceSession(
               data.status === "failed" && data.message
                 ? `${data.name} (${data.status}): ${data.message}`
                 : `${data.name} (${data.status})`;
+            if (data.status === "started") {
+              playCue("tool");
+            }
             pushSystem(`Tool invoked: ${details}`, "tool");
           }
         } catch (err) {
@@ -1106,7 +1152,22 @@ export function useRealtimeVoiceSession(
     setInput("");
   }
 
-  function playCue(type: "start" | "end") {
+  function playAudioAsset(src: string) {
+    try {
+      const audio = new Audio(src);
+      audio.volume = 1.0;
+      void audio.play();
+    } catch (err) {
+      console.warn("Audio asset playback failed:", err);
+    }
+  }
+
+  function playCue(type: "start" | "end" | "tool") {
+    // For tool events, prefer the custom audio asset if available.
+    if (type === "tool") {
+      playAudioAsset("/tool-loading.mp3");
+      return;
+    }
     try {
       const AudioContextCtor =
         (window as any).AudioContext || (window as any).webkitAudioContext;
@@ -1115,8 +1176,18 @@ export function useRealtimeVoiceSession(
       const oscillator = ctx.createOscillator();
       const gain = ctx.createGain();
       oscillator.type = "sine";
-      oscillator.frequency.value = type === "start" ? 880 : 440;
-      gain.gain.value = 0.2;
+      if (type === "start") {
+        oscillator.frequency.value = 880;
+        gain.gain.value = 0.22;
+      } else if (type === "end") {
+        oscillator.frequency.value = 440;
+        gain.gain.value = 0.18;
+      } else {
+        // Tool cue: short, softer blip to indicate that
+        // the assistant is performing a background action.
+        oscillator.frequency.value = 680;
+        gain.gain.value = 0.16;
+      }
       oscillator.connect(gain);
       gain.connect(ctx.destination);
       oscillator.start();

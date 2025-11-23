@@ -2,9 +2,9 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  ArrowLeft,
   ArrowUp,
   AudioLines,
+  Bug,
   Copy,
   Ellipsis,
   Grip,
@@ -12,9 +12,13 @@ import {
   MessageSquare,
   Mic,
   MicOff,
+  Moon,
+  PanelLeft,
   Phone,
-  Plus,
+  Search,
   Settings,
+  Sun,
+  User,
   Volume2,
   VolumeX,
   X,
@@ -22,6 +26,7 @@ import {
 import { ChatBubble } from "@/components/ui/ChatBubble";
 import { MarkdownMessage } from "@/components/ui/MarkdownMessage";
 import { labTheme } from "@/lib/theme";
+import { useTheme } from "@/components/theme/ThemeContext";
 import {
   useRealtimeVoiceSession,
   VoiceMessage,
@@ -44,6 +49,7 @@ export default function MobileVoiceChat() {
     isRecording,
     muted,
     micMuted,
+    currentScope,
     startCall,
     endCall,
     toggleSpeaker: voiceToggleSpeaker,
@@ -58,6 +64,45 @@ export default function MobileVoiceChat() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showMobileSidebar, setShowMobileSidebar] = useState(false);
   const [showHeaderDivider, setShowHeaderDivider] = useState(false);
+  const [showDebug, setShowDebug] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
+  const [debugConfig, setDebugConfig] = useState<{
+    profile?: any;
+    tools?: any;
+    sanitize?: any;
+  } | null>(null);
+  const [debugLoading, setDebugLoading] = useState(false);
+  const [debugError, setDebugError] = useState<string | null>(null);
+  const [debugOffset, setDebugOffset] = useState<{ x: number; y: number }>({
+    x: 0,
+    y: 0,
+  });
+  const [debugSize, setDebugSize] = useState<{ width: number; height: number }>(
+    { width: 320, height: 260 }
+  );
+  const debugDraggingRef = useRef(false);
+  const debugDragStartRef = useRef<{
+    mouseX: number;
+    mouseY: number;
+    offsetX: number;
+    offsetY: number;
+  } | null>(null);
+  const debugOffsetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const debugResizingRef = useRef(false);
+  const debugResizeStartRef = useRef<{
+    mouseX: number;
+    mouseY: number;
+    width: number;
+    height: number;
+  } | null>(null);
+  const debugSizeRef = useRef<{ width: number; height: number }>({
+    width: 320,
+    height: 260,
+  });
+  const [configExpanded, setConfigExpanded] = useState(false);
+  const [eventsExpanded, setEventsExpanded] = useState(true);
+  const { theme, toggleTheme } = useTheme();
+  const isDark = theme === "dark";
   const chatRef = useRef<HTMLDivElement | null>(null);
   const hasTypedInput = input.trim().length > 0;
   const handleCopy = async (text: string) => {
@@ -109,14 +154,128 @@ export default function MobileVoiceChat() {
     voiceToggleMic();
   }
 
-  const suggestions = useMemo(
-    () => [
-      "Dame un resumen rápido",
-      "Repregunta si necesitas detalles",
-      "Activa modo breve con respuestas de 2 frases",
-    ],
-    []
+  const visibleMessages = useMemo(
+    () => messages.filter((m) => m.from !== "system"),
+    [messages]
   );
+
+  const debugEvents = useMemo(
+    () => messages.filter((m) => m.from === "system"),
+    [messages]
+  );
+
+  useEffect(() => {
+    debugOffsetRef.current = debugOffset;
+  }, [debugOffset]);
+
+  useEffect(() => {
+    debugSizeRef.current = debugSize;
+  }, [debugSize]);
+
+  useEffect(() => {
+    function handleMouseMove(e: MouseEvent) {
+      if (debugDraggingRef.current && debugDragStartRef.current) {
+        const { mouseX, mouseY, offsetX, offsetY } = debugDragStartRef.current;
+        const dx = e.clientX - mouseX;
+        const dy = e.clientY - mouseY;
+        const next = { x: offsetX + dx, y: offsetY + dy };
+        debugOffsetRef.current = next;
+        setDebugOffset(next);
+      } else if (debugResizingRef.current && debugResizeStartRef.current) {
+        const { mouseX, mouseY, width, height } = debugResizeStartRef.current;
+        const dx = e.clientX - mouseX;
+        const dy = e.clientY - mouseY;
+        const nextWidth = Math.max(320, width + dx);
+        const nextHeight = Math.max(260, height + dy);
+        const nextSize = { width: nextWidth, height: nextHeight };
+        debugSizeRef.current = nextSize;
+        setDebugSize(nextSize);
+      }
+    }
+
+    function handleMouseUp() {
+      debugDraggingRef.current = false;
+      debugDragStartRef.current = null;
+      debugResizingRef.current = false;
+      debugResizeStartRef.current = null;
+    }
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, []);
+
+  function handleDebugDragStart(e: React.MouseEvent) {
+    e.preventDefault();
+    const current = debugOffsetRef.current;
+    debugDraggingRef.current = true;
+    debugDragStartRef.current = {
+      mouseX: e.clientX,
+      mouseY: e.clientY,
+      offsetX: current.x,
+      offsetY: current.y,
+    };
+  }
+
+  function handleDebugResizeStart(e: React.MouseEvent) {
+    e.preventDefault();
+    const current = debugSizeRef.current;
+    debugResizingRef.current = true;
+    debugResizeStartRef.current = {
+      mouseX: e.clientX,
+      mouseY: e.clientY,
+      width: current.width,
+      height: current.height,
+    };
+  }
+
+  useEffect(() => {
+    if (!showDebug) return;
+    if (debugConfig) return;
+    let cancelled = false;
+    setDebugLoading(true);
+    setDebugError(null);
+
+    async function loadDebugConfig() {
+      try {
+        const [profileRes, toolsRes, sanitizeRes] = await Promise.all([
+          fetch("/api/config/profile"),
+          fetch("/api/config/tools"),
+          fetch("/api/config/sanitize"),
+        ]);
+        if (cancelled) return;
+        if (!profileRes.ok || !toolsRes.ok || !sanitizeRes.ok) {
+          throw new Error("Failed to load debug configuration");
+        }
+        const [profileJson, toolsJson, sanitizeJson] = await Promise.all([
+          profileRes.json(),
+          toolsRes.json(),
+          sanitizeRes.json(),
+        ]);
+        setDebugConfig({
+          profile: profileJson.profile,
+          tools: toolsJson.tools,
+          sanitize: sanitizeJson.sanitize,
+        });
+      } catch (err: any) {
+        if (cancelled) return;
+        setDebugError(err?.message || "Unknown error loading debug config");
+      } finally {
+        if (!cancelled) {
+          setDebugLoading(false);
+        }
+      }
+    }
+
+    void loadDebugConfig();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [showDebug, debugConfig]);
 
   useEffect(() => {
     scrollToBottom();
@@ -135,12 +294,24 @@ export default function MobileVoiceChat() {
 
   return (
     <main
-      className="min-h-screen bg-slate-950 text-slate-100 overflow-hidden"
-      style={{ backgroundImage: labTheme.gradients.canvas }}
+      className={`min-h-screen overflow-hidden ${
+        isDark
+          ? "bg-neutral-900 text-slate-100"
+          : "bg-zinc-50 text-slate-900"
+      }`}
+      style={isDark ? { backgroundImage: labTheme.gradients.canvas } : undefined}
     >
           <div className="flex h-screen overflow-hidden">
         <aside
-          className={`flex-col border-r border-white/5 bg-black/30 backdrop-blur-xl transition-[transform] duration-300 ${
+          className={`flex-col border-r backdrop-blur-xl transition-[transform] duration-300 ${
+            isDark
+              ? sidebarCollapsed
+                ? "border-white/5 bg-neutral-900/80"
+                : "border-white/5 bg-neutral-900/70"
+              : sidebarCollapsed
+              ? "border-zinc-200/60 bg-white/70"
+              : "border-zinc-200/60 bg-zinc-50"
+          } ${
             showMobileSidebar
               ? "fixed inset-y-0 left-0 z-40 flex h-full w-[60vw] max-w-sm translate-x-0 shadow-2xl md:relative md:w-auto md:translate-x-0"
               : "hidden -translate-x-full md:relative md:flex md:h-full md:w-auto md:translate-x-0"
@@ -153,74 +324,129 @@ export default function MobileVoiceChat() {
                 }
           }
         >
-          <div className="flex items-center gap-2 px-4 py-4">
+          <div className="flex items-center gap-2 px-2 py-2">
             <button
-              onClick={() => setSidebarCollapsed((prev) => !prev)}
-              className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-white transition hover:border-white/30"
-              aria-label={sidebarCollapsed ? "Expandir menú" : "Colapsar menú"}
-            >
-              <ArrowLeft
-                className={`h-4 w-4 transition ${sidebarCollapsed ? "rotate-180" : ""}`}
-              />
-            </button>
-            <button
-              className={`ml-auto flex items-center justify-center rounded-full border border-white/15 bg-white/5 px-3 py-2 text-sm font-semibold text-white transition hover:border-white/30 hover:bg-white/10 ${
-                sidebarCollapsed ? "w-10 px-0" : ""
+              onClick={() => {
+                if (sidebarCollapsed) {
+                  setSidebarCollapsed(false);
+                }
+              }}
+              className={`group flex h-10 w-10 items-center justify-center rounded-xl bg-transparent transition ${
+                isDark
+                  ? "text-slate-100 hover:bg-white/5"
+                  : "text-slate-900 hover:bg-zinc-100"
               }`}
-              type="button"
-              title="Nuevo chat"
+              aria-label={sidebarCollapsed ? "Expandir menú" : "Menú"}
             >
-              <Plus className="h-4 w-4" />
+              {sidebarCollapsed ? (
+                <>
+                  <AudioLines className="h-5 w-5 group-hover:hidden" />
+                  <PanelLeft className="hidden h-5 w-5 group-hover:inline-block" />
+                </>
+              ) : (
+                <AudioLines className="h-5 w-5" />
+              )}
             </button>
-          </div>
-
-          <div className="mt-2 space-y-1 px-2">
-            {["Demo retail", "Atención cliente", "Ideas para script"].map(
-              (thread, idx) => (
-                <button
-                  key={thread}
-                  className={`group flex w-full items-center gap-3 rounded-xl border border-white/5 px-3 py-3 text-left transition hover:border-white/20 hover:bg-white/5 ${
-                    idx === 0 ? "bg-white/5" : ""
-                  }`}
-                  type="button"
-                >
-                  <MessageSquare className="h-4 w-4 text-slate-200" />
-                  {!sidebarCollapsed && (
-                    <div className="flex flex-col">
-                      <span className="text-sm font-medium text-white">{thread}</span>
-                      <span className="text-xs text-slate-400">Sesión rápida</span>
-                    </div>
-                  )}
-                </button>
-              )
+            {!sidebarCollapsed && (
+              <button
+                className={`ml-auto flex h-10 w-10 items-center justify-center rounded-xl bg-transparent text-sm font-semibold transition ${
+                  isDark
+                    ? "text-gray-400 hover:bg-white/5 hover:text-gray-100"
+                    : "text-gray-500 hover:bg-zinc-100 hover:text-gray-900"
+                }`}
+                type="button"
+                onClick={() => {
+                  if (showMobileSidebar) {
+                    setShowMobileSidebar(false);
+                  } else {
+                    setSidebarCollapsed(true);
+                  }
+                }}
+                title="Close sidebar"
+              >
+                {showMobileSidebar ? (
+                  <X className="h-5 w-5" />
+                ) : (
+                  <PanelLeft className="h-5 w-5" />
+                )}
+              </button>
             )}
           </div>
 
-          {!sidebarCollapsed && (
-            <div className="mt-6 px-4">
-              <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">
-                Atajos
-              </p>
-              <div className="mt-3 space-y-2">
-                {suggestions.map((suggestion) => (
-                  <div
-                    key={suggestion}
-                    className="rounded-xl border border-white/5 bg-white/[0.03] px-3 py-2 text-sm text-slate-200"
-                  >
-                    {suggestion}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+          <div
+            className={`mt-2 space-y-1 ${
+              sidebarCollapsed ? "px-0" : "px-2"
+            }`}
+          >
+            {["New chat", "Search", "Settings"].map((label) => {
+              const icon =
+                label === "New chat"
+                  ? MessageSquare
+                  : label === "Search"
+                  ? Search
+                  : Settings;
+              const Icon = icon;
+              return (
+                <button
+                  key={label}
+                  className={`group flex items-center rounded-xl py-2 text-left transition ${
+                    sidebarCollapsed
+                      ? "h-10 w-10 justify-center mx-auto"
+                      : "w-full gap-3 px-2"
+                  } ${isDark ? "hover:bg-white/5" : "hover:bg-zinc-100"}`}
+                  type="button"
+                >
+                  <Icon
+                    className={`h-5 w-5 ${
+                      isDark ? "text-slate-200" : "text-slate-700"
+                    }`}
+                  />
+                  {!sidebarCollapsed && (
+                    <span
+                      className={`text-sm font-medium ${
+                        isDark ? "text-slate-100" : "text-slate-900"
+                      }`}
+                    >
+                      {label}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
 
-          <div className="mt-auto border-t border-white/5 px-4 py-4">
+          <div className="mt-auto px-2 py-3">
             <button
               type="button"
-              className="flex w-full items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-left text-sm text-slate-200 transition hover:border-white/30 hover:bg-white/10"
+              className={`group flex items-center rounded-xl px-2 py-2 text-left text-sm transition ${
+                sidebarCollapsed
+                  ? "h-10 w-10 justify-center mx-auto"
+                  : "w-full gap-3"
+              } ${isDark ? "hover:bg-white/5" : "hover:bg-zinc-100"}`}
             >
-              <Settings className="h-4 w-4" />
-              {!sidebarCollapsed && <span>Preferencias</span>}
+              <User
+                className={`h-6 w-6 ${
+                  isDark ? "text-slate-200" : "text-slate-700"
+                }`}
+              />
+              {!sidebarCollapsed && (
+                <div className="ml-2 flex flex-col">
+                  <span
+                    className={`text-sm font-medium ${
+                      isDark ? "text-slate-100" : "text-slate-900"
+                    }`}
+                  >
+                    Alex Johnson
+                  </span>
+                  <span
+                    className={`text-xs ${
+                      isDark ? "text-slate-400" : "text-slate-500"
+                    }`}
+                  >
+                    alex.johnson@example.com
+                  </span>
+                </div>
+              )}
             </button>
           </div>
         </aside>
@@ -232,22 +458,50 @@ export default function MobileVoiceChat() {
             aria-hidden
           />
         )}
-        <div className="flex flex-1 flex-col min-w-0 bg-black/30 backdrop-blur-xl">
+        <div
+          className={`flex flex-1 flex-col min-w-0 backdrop-blur-xl ${
+            isDark ? "bg-neutral-900/80" : "bg-white/70"
+          }`}
+        >
           <header
-            className={`sticky top-0 z-20 flex flex-wrap items-center justify-between gap-2 border-b bg-transparent px-4 py-3 transition-colors sm:px-6 md:px-2 ${
+            className={`sticky top-0 z-20 flex flex-wrap items-center justify-between gap-2 border-b bg-transparent px-2 py-2 transition-colors sm:px-6 md:px-2 ${
               showHeaderDivider ? "border-white/10" : "border-transparent"
-            }`}
+            } relative`}
           >
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center sm:gap-1.5">
               <button
-                onClick={() => setShowMobileSidebar((prev) => !prev)}
-                className="flex h-11 w-11 items-center justify-center rounded-lg bg-transparent text-white transition sm:hidden"
+                onClick={() =>
+                  setShowMobileSidebar((prev) => {
+                    const next = !prev;
+                    if (next) {
+                      setSidebarCollapsed(true);
+                    }
+                    return next;
+                  })
+                }
+                className={`flex h-10 w-10 items-center justify-center rounded-lg bg-transparent transition sm:hidden ${
+                  isDark
+                    ? "text-white hover:bg-white/5"
+                    : "text-slate-900 hover:bg-zinc-100"
+                }`}
                 aria-label="Toggle menú"
               >
                 <Menu className="h-5 w-5" />
               </button>
-              <div className="flex h-10 items-center gap-2 rounded-lg border border-transparent px-3 transition hover:border-transparent hover:bg-white/5">
-                <span className="text-lg font-normal text-white">Voice Agent</span>
+              <div
+                className={`flex h-10 items-center gap-2 rounded-lg border px-3 transition ${
+                  isDark
+                    ? "border-transparent bg-transparent hover:border-transparent hover:bg-white/5"
+                    : "border-transparent bg-transparent hover:border-transparent hover:bg-zinc-100"
+                }`}
+              >
+                <span
+                  className={`text-lg font-normal ${
+                    isDark ? "text-white" : "text-slate-900"
+                  }`}
+                >
+                  Voice Agent
+                </span>
                 <span
                   className={`status-dot ${wsConnected ? "dot-online" : "dot-offline"} h-2.5 w-2.5`}
                   aria-hidden
@@ -258,8 +512,13 @@ export default function MobileVoiceChat() {
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                className="flex h-10 w-10 items-center justify-center rounded-lg border border-transparent text-white transition hover:border-transparent hover:bg-white/5"
+                className={`flex h-10 w-10 items-center justify-center rounded-lg border transition cursor-pointer ${
+                  isDark
+                    ? "border-transparent text-white hover:border-transparent hover:bg-white/5"
+                    : "border-transparent text-slate-800 hover:border-transparent hover:bg-zinc-100"
+                }`}
                 title="Más opciones"
+                onClick={() => setShowMenu((prev) => !prev)}
               >
                 <Ellipsis className="h-5 w-5" />
               </button>
@@ -267,8 +526,12 @@ export default function MobileVoiceChat() {
                 onClick={() => setShowMobileControls((prev) => !prev)}
                 className={`flex h-9 w-9 items-center justify-center rounded-xl border transition sm:hidden ${
                   showMobileControls
-                    ? "border-white/20 bg-white/10 text-white hover:border-white/40"
-                    : "border-white/10 bg-white/5 text-white/50 hover:border-white/20"
+                    ? isDark
+                      ? "border-white/20 bg-white/10 text-white hover:border-white/40"
+                      : "border-zinc-300 bg-white text-slate-900 hover:border-zinc-400"
+                    : isDark
+                    ? "border-white/10 bg-white/5 text-white/50 hover:border-white/20"
+                    : "border-zinc-200 bg-white/60 text-slate-700 hover:border-zinc-300"
                 }`}
                 aria-label={showMobileControls ? "Ocultar controles" : "Mostrar controles"}
               >
@@ -277,13 +540,62 @@ export default function MobileVoiceChat() {
             </div>
           </header>
 
+          {showMenu && (
+            <div
+              className={`absolute right-4 top-14 z-30 w-48 rounded-xl border shadow-lg backdrop-blur-sm ${
+                isDark
+                  ? "border-white/10 bg-neutral-900/95"
+                  : "border-zinc-200 bg-white"
+              }`}
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDebug((prev) => !prev);
+                  setShowMenu(false);
+                }}
+                className={`flex w-full items-center gap-2 rounded-t-xl px-3 py-2 text-[15px] cursor-pointer ${
+                  isDark
+                    ? "text-slate-100 hover:bg-white/10"
+                    : "text-slate-800 hover:bg-zinc-50"
+                }`}
+              >
+                <Bug className="h-3.5 w-3.5 text-sky-300" />
+                <span className="flex-1 text-left">
+                  Debug mode {showDebug ? "(on)" : "(off)"}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  toggleTheme();
+                  setShowMenu(false);
+                }}
+                className={`flex w-full items-center gap-2 rounded-b-xl border-t px-3 py-2 text-[15px] cursor-pointer ${
+                  isDark
+                    ? "border-white/10 text-slate-100 hover:bg-white/10"
+                    : "border-zinc-200 text-slate-800 hover:bg-zinc-50"
+                }`}
+              >
+                {isDark ? (
+                  <Sun className="h-3.5 w-3.5 text-amber-300" />
+                ) : (
+                  <Moon className="h-3.5 w-3.5 text-sky-500" />
+                )}
+                <span className="flex-1 text-left">
+                  {isDark ? "Switch to light theme" : "Switch to dark theme"}
+                </span>
+              </button>
+            </div>
+          )}
+
           <div className="flex flex-1 flex-col min-h-0 px-4 pb-6 sm:px-6 md:px-10">
             <div
               ref={chatRef}
               className="flex-1 overflow-y-auto pt-6 pb-4 pr-1"
             >
               <div className="mx-auto flex max-w-3xl flex-col gap-6">
-                {messages.map((message, idx) => {
+                {visibleMessages.map((message, idx) => {
                   const isAssistant = message.from === "assistant";
                   const showActions = isAssistant && !loading;
                   const isLast = idx === messages.length - 1;
@@ -291,31 +603,39 @@ export default function MobileVoiceChat() {
                   if (isAssistant) {
                     return (
                       <div key={message.id} className="space-y-2 px-1">
-                      <MarkdownMessage text={message.text} />
-                      {showActions && (
-                        <div
-                          className="flex items-center gap-2"
-                          style={{ opacity: isLast ? 1 : 1 }}
-                        >
-                          <button
-                            type="button"
-                            onClick={() => void handleCopy(message.text)}
-                            className="flex h-8 w-8 items-center justify-center rounded-full text-white/70 transition hover:bg-white/10 hover:text-white cursor-pointer"
-                            title="Copiar"
+                        <MarkdownMessage text={message.text} />
+                        {showActions && (
+                          <div
+                            className="flex items-center gap-1"
+                            style={{ opacity: isLast ? 1 : 1 }}
                           >
-                            <Copy className="h-4 w-4" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void speak(message.text)}
-                            className="flex h-8 w-8 items-center justify-center rounded-full text-white/70 transition hover:bg-white/10 hover:text-white cursor-pointer"
-                            title="Reproducir audio"
-                          >
-                            <Volume2 className="h-4 w-4" />
-                          </button>
-                        </div>
-                      )}
-                    </div>
+                            <button
+                              type="button"
+                              onClick={() => void handleCopy(message.text)}
+                              className={`flex h-9 w-9 items-center justify-center rounded-lg transition cursor-pointer ${
+                                isDark
+                                  ? "text-white/70 hover:bg-white/10 hover:text-white"
+                                  : "text-slate-700 hover:bg-zinc-100 hover:text-slate-900"
+                              }`}
+                              title="Copiar"
+                            >
+                              <Copy className="h-5 w-5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void speak(message.text)}
+                              className={`flex h-9 w-9 items-center justify-center rounded-lg transition cursor-pointer ${
+                                isDark
+                                  ? "text-white/70 hover:bg-white/10 hover:text-white"
+                                  : "text-slate-700 hover:bg-zinc-100 hover:text-slate-900"
+                              }`}
+                              title="Reproducir audio"
+                            >
+                              <Volume2 className="h-5 w-5" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     );
                   }
 
@@ -362,12 +682,289 @@ export default function MobileVoiceChat() {
               </div>
             </div>
 
+            {showDebug && (
+              <div className="fixed inset-0 z-40 flex items-end justify-end pointer-events-none">
+                <div
+                  className={`pointer-events-auto m-4 rounded-2xl border px-4 py-3 text-xs shadow-lg flex flex-col overflow-hidden relative ${
+                    isDark
+                      ? "border-sky-500/40 bg-neutral-900/95 text-sky-100"
+                      : "border-zinc-300 bg-white text-slate-900"
+                  }`}
+                  style={{
+                    transform: `translate(${debugOffset.x}px, ${debugOffset.y}px)`,
+                    width: `${debugSize.width}px`,
+                    height: `${debugSize.height}px`,
+                    maxWidth: "min(520px, 100% - 32px)",
+                    maxHeight: "min(560px, 100% - 32px)",
+                  }}
+                >
+                  <div
+                    className="mb-2 cursor-move pr-6"
+                    onMouseDown={handleDebugDragStart}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span
+                        className={`text-[11px] font-semibold ${
+                          isDark ? "text-sky-300" : "text-sky-700"
+                        }`}
+                      >
+                        Debug panel
+                      </span>
+                    </div>
+                    <div className="mt-1 flex flex-wrap items-center gap-2">
+                      <span
+                        className={`inline-flex items-center rounded-full px-2 py-[1px] text-[10px] ${
+                          isDark
+                            ? "bg-neutral-900/80 text-slate-300"
+                            : "bg-zinc-100 text-slate-700"
+                        }`}
+                      >
+                        WS: {wsConnected ? "connected" : "disconnected"}
+                      </span>
+                      <span
+                        className={`inline-flex items-center rounded-full px-2 py-[1px] text-[10px] ${
+                          isDark
+                            ? "bg-neutral-900/80 text-slate-300"
+                            : "bg-zinc-100 text-slate-700"
+                        }`}
+                      >
+                        Call: {callStatus}
+                      </span>
+                      <span
+                        className={`inline-flex items-center rounded-full px-2 py-[1px] text-[10px] ${
+                          isDark
+                            ? "bg-neutral-900/80 text-slate-300"
+                            : "bg-zinc-100 text-slate-700"
+                        }`}
+                      >
+                        Mic: {micMuted ? "muted" : "open"}
+                      </span>
+                      <span
+                        className={`inline-flex items-center rounded-full px-2 py-[1px] text-[10px] ${
+                          isDark
+                            ? "bg-neutral-900/80 text-slate-300"
+                            : "bg-zinc-100 text-slate-700"
+                        }`}
+                      >
+                        Speaker: {muted ? "muted" : "on"}
+                      </span>
+                      <span
+                        className={`inline-flex items-center rounded-full px-2 py-[1px] text-[10px] ${
+                          isDark
+                            ? "bg-neutral-900/80 text-slate-300"
+                            : "bg-zinc-100 text-slate-700"
+                        }`}
+                      >
+                        Assistant: {assistantTalking ? "speaking" : "idle"}
+                      </span>
+                      <span
+                        className={`inline-flex items-center rounded-full px-2 py-[1px] text-[10px] ${
+                          isDark
+                            ? "bg-neutral-900/80 text-slate-300"
+                            : "bg-zinc-100 text-slate-700"
+                        }`}
+                      >
+                        Scope: {currentScope || "n/a"}
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowDebug(false);
+                    }}
+                    className={`absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full ${
+                      isDark
+                        ? "bg-neutral-900 text-slate-300 hover:bg-neutral-800"
+                        : "bg-zinc-200 text-slate-700 hover:bg-zinc-300"
+                    }`}
+                    aria-label="Close debug panel"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+
+                  <div
+                    className={`mt-1 flex-1 min-h-0 overflow-y-auto border-t pt-2 ${
+                      isDark ? "border-white/10" : "border-zinc-200"
+                    }`}
+                  >
+                    <div className="mb-2">
+                      <button
+                        type="button"
+                        onClick={() => setConfigExpanded((prev) => !prev)}
+                        className={`flex w-full items-center justify-between text-[11px] font-semibold ${
+                          isDark ? "text-sky-300" : "text-sky-700"
+                        }`}
+                      >
+                        <span>Configuration</span>
+                        <span className="text-[10px] text-slate-400">
+                          {configExpanded ? "Collapse" : "Expand"}
+                        </span>
+                      </button>
+                      {configExpanded && (
+                        <div className="mt-1">
+                          {debugLoading && (
+                            <p className="text-slate-400">
+                              Loading debug config…
+                            </p>
+                          )}
+                          {debugError && (
+                            <p className="text-rose-400">
+                              Error loading config: {debugError}
+                            </p>
+                          )}
+                          {!debugLoading && !debugError && debugConfig && (
+                            <div className="space-y-1">
+                              <p
+                                className={`text-[11px] ${
+                                  isDark ? "text-slate-200" : "text-slate-700"
+                                }`}
+                              >
+                                <span
+                                  className={`font-semibold ${
+                                    isDark
+                                      ? "text-sky-300"
+                                      : "text-sky-700"
+                                  }`}
+                                >
+                                  Profile blocks:
+                                </span>{" "}
+                                {Object.keys(
+                                  debugConfig.profile ?? {}
+                                ).join(", ") || "none"}
+                              </p>
+                              <p
+                                className={`text-[11px] ${
+                                  isDark ? "text-slate-200" : "text-slate-700"
+                                }`}
+                              >
+                                <span
+                                  className={`font-semibold ${
+                                    isDark
+                                      ? "text-sky-300"
+                                      : "text-sky-700"
+                                  }`}
+                                >
+                                  Tools:
+                                </span>{" "}
+                                {Array.isArray(debugConfig.tools) &&
+                                debugConfig.tools.length > 0
+                                  ? debugConfig.tools
+                                      .map((t: any) => t.name)
+                                      .join(", ")
+                                  : "none"}
+                              </p>
+                              <p
+                                className={`text-[11px] ${
+                                  isDark ? "text-slate-200" : "text-slate-700"
+                                }`}
+                              >
+                                <span
+                                  className={`font-semibold ${
+                                    isDark
+                                      ? "text-sky-300"
+                                      : "text-sky-700"
+                                  }`}
+                                >
+                                  Sanitize rules:
+                                </span>{" "}
+                                {Array.isArray(debugConfig.sanitize) &&
+                                debugConfig.sanitize.length > 0
+                                  ? debugConfig.sanitize.length
+                                  : 0}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    <div
+                      className={`mt-1 border-t pt-2 ${
+                        isDark ? "border-white/10" : "border-zinc-200"
+                      }`}
+                    >
+                      <div className="mb-1 flex items-center justify-between">
+                        <button
+                          type="button"
+                          onClick={() => setEventsExpanded((prev) => !prev)}
+                          className={`flex w-full items-center justify-between text-[11px] font-semibold ${
+                            isDark ? "text-sky-300" : "text-sky-700"
+                          }`}
+                        >
+                          <span>Events</span>
+                          <span className="text-[10px] text-slate-400">
+                            {eventsExpanded ? "Collapse" : "Expand"}
+                          </span>
+                        </button>
+                      </div>
+                      {eventsExpanded && (
+                        <div className="space-y-1 pr-1">
+                          {debugEvents.length === 0 ? (
+                            <p className="text-slate-400">
+                              No events yet.
+                            </p>
+                          ) : (
+                            debugEvents.map((event) => (
+                              <div
+                                key={event.id}
+                                className={`flex items-start gap-2 rounded-lg px-2 py-1 ${
+                                  isDark
+                                    ? "bg-neutral-900/70"
+                                    : "bg-zinc-100"
+                                }`}
+                              >
+                                {event.meta && (
+                                  <span className="mt-[2px] inline-flex shrink-0 rounded-full bg-sky-500/20 px-2 py-[1px] text-[10px] font-semibold uppercase tracking-wide text-sky-300">
+                                    {event.meta}
+                                  </span>
+                                )}
+                                <span
+                                  className={`break-words text-[11px] ${
+                                    isDark
+                                      ? "text-slate-100"
+                                      : "text-slate-800"
+                                  }`}
+                                >
+                                  {event.text}
+                                </span>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                      handleDebugResizeStart(e);
+                    }}
+                    className={`absolute bottom-1 right-1 flex h-4 w-4 cursor-se-resize items-center justify-center rounded-md border ${
+                      isDark
+                        ? "border-sky-500/70 bg-neutral-900/90 text-sky-300 hover:bg-neutral-800"
+                        : "border-zinc-300 bg-zinc-200 text-slate-700 hover:bg-zinc-300"
+                    }`}
+                    aria-label="Resize debug panel"
+                  >
+                    <Grip className="h-3 w-3" />
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div className="mx-auto w-full max-w-3xl px-2 sm:px-4">
               <div className="flex items-center gap-3">
                 <div className="relative flex-1">
                   <input
                     type="text"
-                    className="h-14 w-full rounded-full border border-white/10 bg-white/10 pl-5 pr-16 text-base text-white placeholder:text-slate-500 focus:outline-none"
+                    className={`h-14 w-full rounded-full border pl-5 pr-16 text-base placeholder:text-neutral-400 focus:outline-none ${
+                      isDark
+                        ? "border-white/10 bg-white/10 text-slate-100"
+                        : "border-zinc-300 bg-white text-slate-900"
+                    }`}
                     placeholder={
                       callStatus === "in_call"
                         ? "Habla o escribe aquí…"
@@ -402,10 +999,14 @@ export default function MobileVoiceChat() {
                     }}
                     className={`absolute right-2 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border text-base font-semibold transition focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed ${
                       hasTypedInput
-                        ? "border-white/20 bg-white text-slate-900 hover:bg-slate-100 cursor-pointer"
+                        ? isDark
+                          ? "border-white/20 bg-white/10 text-white hover:bg-white/20 cursor-pointer"
+                          : "border-zinc-300 bg-zinc-100 text-slate-900 hover:border-zinc-400 hover:bg-zinc-200 cursor-pointer"
                         : callStatus === "in_call"
                         ? "border-rose-400/70 bg-rose-500/90 text-white hover:bg-rose-400 cursor-pointer"
-                        : "border-white/30 bg-white/15 text-white/80 hover:border-white/40 hover:bg-white/25 hover:text-white cursor-pointer"
+                        : isDark
+                        ? "border-white/30 bg-white/15 text-white/80 hover:border-white/40 hover:bg-white/25 hover:text-white cursor-pointer"
+                        : "border-zinc-300 bg-zinc-100 text-slate-800 hover:border-zinc-400 hover:bg-zinc-200 cursor-pointer"
                     }`}
                     title={
                       hasTypedInput
@@ -440,7 +1041,9 @@ export default function MobileVoiceChat() {
                     className={`flex h-12 w-12 items-center justify-center rounded-full border text-white transition ${
                       muted
                         ? "border-amber-500 bg-amber-500 text-slate-900"
-                        : "border-white/20 bg-slate-900"
+                        : isDark
+                        ? "border-white/20 bg-neutral-900"
+                        : "border-zinc-300 bg-zinc-800"
                     }`}
                     title={muted ? "Activar altavoz" : "Silenciar altavoz"}
                   >
@@ -478,7 +1081,9 @@ export default function MobileVoiceChat() {
                     className={`flex h-12 w-12 items-center justify-center rounded-full border text-white transition ${
                       micMuted
                         ? "border-rose-500 bg-rose-500 text-white"
-                        : "border-white/20 bg-slate-900"
+                        : isDark
+                        ? "border-white/20 bg-neutral-900"
+                        : "border-zinc-300 bg-zinc-800"
                     }`}
                     title={micMuted ? "Activar micro" : "Silenciar micro"}
                   >

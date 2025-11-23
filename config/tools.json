@@ -51,6 +51,22 @@
       }
     },
     {
+      "name": "get_weather",
+      "description": "Returns the current weather for a given city.",
+      "kind": "business",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "city": { "type": "string" }
+        },
+        "required": ["city"]
+      },
+      "routes": {
+        "method": "GET",
+        "path": "/api/tools/weather"
+      }
+    },
+    {
       "name": "end_call",
       "kind": "session",
       "ui_command": "end_call",

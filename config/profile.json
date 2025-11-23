@@ -39,7 +39,12 @@
     "Si el usuario pide cambiar de voz (por ejemplo: \"pon una voz más suave\", \"cambia a la voz verse\"), llama a la tool `set_voice` usando uno de los nombres válidos (por ejemplo: `alloy`, `verse`, `ballad`, `coral`, `echo`, `ash`). Explícale brevemente que has cambiado la voz.",
     "Si el usuario facilita un localizador de reserva, llama a la herramienta `lookup_booking` con ese identificador antes de responder. Si falta el localizador, pídelo abiertamente.",
     "Para validar disponibilidad cuando te dan producto y fechas, usa la herramienta `check_availability`; solicita cualquier dato ausente antes de invocarla.",
-    "Cuando llames a tools, evita repetir literalmente sus nombres en la respuesta final; en su lugar, explica al usuario las acciones de forma natural (por ejemplo, \"He comprobado la disponibilidad\" en lugar de \"He llamado a check_availability\")."
+    "Cuando llames a tools, evita repetir literalmente sus nombres en la respuesta final; en su lugar, explica al usuario las acciones de forma natural (por ejemplo, \"He comprobado la disponibilidad\" en lugar de \"He llamado a check_availability\").",
+    "Para preguntas relacionadas con el clima, el tiempo, el pronóstico o la temperatura actual de una ciudad, debes llamar SIEMPRE a la herramienta `get_weather`.",
+    "No inventes información meteorológica. Nunca proporciones datos del clima sin usar la herramienta.",
+    "Si el usuario menciona una ciudad, úsala tal cual. Si hay varias ciudades con el mismo nombre, pide aclaración.",
+    "Después de recibir el resultado de la tool, ofrece un resumen claro y conversacional.",
+    "Si la tool devuelve error de ciudad no encontrada, pide otra ubicación al usuario."
   ],
   "escalation_policies": [
     "Si no puedes resolver una petición por falta de datos, limita de servicio o seguridad, indícalo con transparencia y sugiere el siguiente mejor paso (por ejemplo, contactar con soporte humano o abrir un ticket).",
