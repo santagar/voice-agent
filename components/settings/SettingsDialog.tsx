@@ -4,6 +4,7 @@ import React, { useEffect, useState } from "react";
 import {
   Bell,
   CalendarClock,
+  Check,
   ChevronDown,
   Palette,
   Plug,
@@ -182,9 +183,9 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                     </button>
                     {appearanceOpen && (
                       <div
-                        className={`absolute right-0 z-40 mt-1 w-40 rounded-lg border text-xs shadow-sm ${
+                        className={`absolute right-0 z-40 mt-1 w-48 rounded-xl border shadow-lg backdrop-blur-sm ${
                           isDark
-                            ? "border-white/10 bg-neutral-900"
+                            ? "border-white/10 bg-neutral-800/95"
                             : "border-zinc-200 bg-white"
                         }`}
                       >
@@ -212,25 +213,22 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                               }
                               setAppearanceOpen(false);
                             }}
-                            className={`flex w-full items-center justify-between px-3 py-1.5 text-left ${
+                            className={`flex w-full items-center gap-2 px-3 py-2 text-[14px] cursor-pointer ${
                               isDark
-                                ? "hover:bg-white/10"
-                                : "hover:bg-zinc-100"
-                            } ${
-                              appearanceMode === mode
-                                ? isDark
-                                  ? "text-gray-100"
-                                  : "text-gray-900"
-                                : "text-gray-500"
+                                ? "text-gray-100 hover:bg-white/10"
+                                : "text-gray-800 hover:bg-zinc-50"
                             }`}
                           >
-                            <span>
+                            <span className="flex-1 text-left">
                               {mode === "system"
                                 ? t("settings.general.appearance.system")
                                 : mode === "light"
                                 ? t("settings.general.appearance.light")
                                 : t("settings.general.appearance.dark")}
                             </span>
+                            {appearanceMode === mode && (
+                              <Check className="h-4 w-4 text-gray-400" />
+                            )}
                           </button>
                         ))}
                       </div>
@@ -269,9 +267,9 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                     </button>
                     {languageOpen && (
                       <div
-                        className={`absolute right-0 z-40 mt-1 w-40 rounded-lg border text-xs shadow-sm ${
+                        className={`absolute right-0 z-40 mt-1 w-48 rounded-xl border shadow-lg backdrop-blur-sm ${
                           isDark
-                            ? "border-white/10 bg-neutral-900"
+                            ? "border-white/10 bg-neutral-800/95"
                             : "border-zinc-200 bg-white"
                         }`}
                       >
@@ -283,23 +281,20 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                               setLocale(code);
                               setLanguageOpen(false);
                             }}
-                            className={`flex w-full items-center justify-between px-3 py-1.5 text-left ${
+                            className={`flex w-full items-center gap-2 px-3 py-2 text-[14px] cursor-pointer ${
                               isDark
-                                ? "hover:bg-white/10"
-                                : "hover:bg-zinc-100"
-                            } ${
-                              locale === code
-                                ? isDark
-                                  ? "text-gray-100"
-                                  : "text-gray-900"
-                                : "text-gray-500"
+                                ? "text-gray-100 hover:bg-white/10"
+                                : "text-gray-800 hover:bg-zinc-50"
                             }`}
                           >
-                            <span>
+                            <span className="flex-1 text-left">
                               {code === "es"
                                 ? t("settings.general.language.es")
                                 : t("settings.general.language.en")}
                             </span>
+                            {locale === code && (
+                              <Check className="h-4 w-4 text-gray-400" />
+                            )}
                           </button>
                         ))}
                       </div>
