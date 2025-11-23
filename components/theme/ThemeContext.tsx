@@ -18,26 +18,25 @@ type ThemeContextValue = {
 
 const ThemeContext = createContext<ThemeContextValue | undefined>(undefined);
 
-export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>("light");
+type ThemeProviderProps = {
+  children: React.ReactNode;
+  initialTheme: Theme;
+};
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const stored = window.localStorage.getItem("va-theme");
-    if (stored === "light" || stored === "dark") {
-      setThemeState(stored);
-    }
-  }, []);
+export function ThemeProvider({ children, initialTheme }: ThemeProviderProps) {
+  const [theme, setThemeState] = useState<Theme>(initialTheme);
 
   useEffect(() => {
     if (typeof document === "undefined") return;
     const root = document.documentElement;
     root.classList.toggle("dark", theme === "dark");
     root.dataset.theme = theme;
+    // Persist theme in a cookie so the server can render
+    // the correct theme on the next request.
     try {
-      window.localStorage.setItem("va-theme", theme);
+      document.cookie = `va-theme=${theme}; path=/; max-age=31536000`;
     } catch {
-      // ignore storage errors
+      // ignore cookie errors
     }
   }, [theme]);
 
@@ -63,4 +62,3 @@ export function useTheme() {
   }
   return ctx;
 }
-

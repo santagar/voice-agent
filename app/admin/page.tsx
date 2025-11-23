@@ -1,6 +1,6 @@
 export default function AdminHome() {
   return (
-    <main className="min-h-screen bg-neutral-900 text-slate-100 flex items-center justify-center">
+    <main className="min-h-screen bg-neutral-800 text-slate-100 flex items-center justify-center">
       <div className="text-center space-y-2">
         <h1 className="text-2xl font-semibold">Admin</h1>
         <p className="text-sm text-slate-400">

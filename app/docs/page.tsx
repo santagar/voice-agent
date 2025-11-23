@@ -36,7 +36,7 @@ export default function DocsPage() {
   return (
     <main
       className={`min-h-screen overflow-auto ${
-        isDark ? "bg-neutral-900 text-slate-50" : "bg-zinc-50 text-slate-900"
+        isDark ? "bg-neutral-800 text-slate-50" : "bg-zinc-50 text-slate-900"
       }`}
       style={isDark ? { backgroundImage: labTheme.gradients.canvas } : undefined}
     >
@@ -57,7 +57,7 @@ export default function DocsPage() {
           <ThemeToggle />
         </header>
 
-        <section className="flex-1 rounded-2xl border border-white/10 bg-neutral-900/80 px-4 py-4 shadow-xl backdrop-blur-xl sm:px-6 sm:py-5">
+        <section className="flex-1 rounded-2xl border border-white/10 bg-neutral-800/80 px-4 py-4 shadow-xl backdrop-blur-xl sm:px-6 sm:py-5">
           {content ? (
             <div className="prose prose-invert prose-sm max-w-none">
               <ReactMarkdown>{content}</ReactMarkdown>

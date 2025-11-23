@@ -17,7 +17,7 @@ export function Modal({ title, onClose, children, className }: ModalProps) {
         aria-modal="true"
         aria-label={title}
         className={cn(
-          "w-full max-w-2xl rounded-3xl border border-white/10 bg-neutral-900/95 p-6",
+          "w-full max-w-2xl rounded-3xl border border-white/10 bg-neutral-800/95 p-6",
           className
         )}
         style={{

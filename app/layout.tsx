@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme/ThemeContext";
+import { LocaleProvider } from "@/components/locale/LocaleContext";
+import { getInitialUserPreferences } from "@/lib/server/userPreferences";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -26,17 +28,28 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const { theme: initialTheme, locale: initialLocale } =
+    await getInitialUserPreferences();
+
   return (
-    <html lang="en">
+    <html
+      lang="en"
+      data-theme={initialTheme}
+      className={initialTheme === "dark" ? "dark" : ""}
+    >
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <ThemeProvider>{children}</ThemeProvider>
+        <ThemeProvider initialTheme={initialTheme}>
+          <LocaleProvider initialLocale={initialLocale}>
+            {children}
+          </LocaleProvider>
+        </ThemeProvider>
       </body>
     </html>
   );
