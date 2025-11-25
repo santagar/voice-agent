@@ -4,8 +4,6 @@ import React, { useEffect, useState } from "react";
 import {
   Bell,
   CalendarClock,
-  Check,
-  ChevronDown,
   Palette,
   Plug,
   Shield,
@@ -16,6 +14,8 @@ import {
 } from "lucide-react";
 import { useTheme } from "@/components/theme/ThemeContext";
 import { useLocale } from "@/components/locale/LocaleContext";
+import { Modal } from "@/components/ui/Modal";
+import { SelectMenu } from "@/components/ui/SelectMenu";
 
 type SettingsDialogProps = {
   open: boolean;
@@ -40,8 +40,6 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
   const [appearanceMode, setAppearanceMode] = useState<
     "system" | "light" | "dark"
   >("system");
-  const [appearanceOpen, setAppearanceOpen] = useState(false);
-  const [languageOpen, setLanguageOpen] = useState(false);
   const [activeSection, setActiveSection] = useState<"general" | string>(
     "general"
   );
@@ -52,8 +50,6 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
   useEffect(() => {
     if (open) {
       setActiveSection("general");
-      setAppearanceOpen(false);
-      setLanguageOpen(false);
 
       // Sync appearance mode with the user preference stored in cookie (UI only).
       try {
@@ -75,14 +71,9 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
   if (!open) return null;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4"
-      onClick={onClose}
-      aria-hidden
-    >
+    <Modal open={open} onClose={onClose}>
       <div
-        onClick={(e) => e.stopPropagation()}
-        className={`flex w-full max-w-2xl overflow-hidden rounded-3xl border text-sm shadow-xl ${
+        className={`flex w-full overflow-hidden rounded-3xl border text-sm shadow-xl ${
           isDark
             ? "border-white/10 bg-neutral-900 text-gray-100"
             : "border-zinc-200 bg-white text-gray-900"
@@ -162,78 +153,47 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                       {t("settings.general.appearance.helper")}
                     </span>
                   </div>
-                  <div className="relative">
-                    <button
-                      type="button"
-                      onClick={() => setAppearanceOpen((prev) => !prev)}
-                      className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium cursor-pointer ${
-                        isDark
-                          ? "bg-transparent text-gray-100 hover:bg-white/10"
-                          : "bg-transparent text-gray-800 hover:bg-zinc-100"
-                      }`}
-                    >
-                      <span>
-                        {appearanceMode === "system"
-                          ? t("settings.general.appearance.system")
-                          : appearanceMode === "light"
-                          ? t("settings.general.appearance.light")
-                          : t("settings.general.appearance.dark")}
-                      </span>
-                      <ChevronDown className="h-4 w-4 opacity-80" />
-                    </button>
-                    {appearanceOpen && (
-                      <div
-                        className={`absolute right-0 z-40 mt-1 w-48 rounded-xl border shadow-lg backdrop-blur-sm ${
-                          isDark
-                            ? "border-white/10 bg-neutral-800/95"
-                            : "border-zinc-200 bg-white"
-                        }`}
-                      >
-                        {(["system", "light", "dark"] as const).map((mode) => (
-                          <button
-                            key={mode}
-                            type="button"
-                            onClick={() => {
-                              setAppearanceMode(mode);
-                              try {
-                                document.cookie = `va-theme-mode=${mode}; path=/; max-age=31536000`;
-                              } catch {
-                                // ignore cookie errors
-                              }
-                              if (mode === "system") {
-                                const prefersDark =
-                                  typeof window !== "undefined" &&
-                                  window.matchMedia &&
-                                  window.matchMedia(
-                                    "(prefers-color-scheme: dark)"
-                                  ).matches;
-                                setTheme(prefersDark ? "dark" : "light");
-                              } else {
-                                setTheme(mode);
-                              }
-                              setAppearanceOpen(false);
-                            }}
-                            className={`flex w-full items-center gap-2 px-3 py-2 text-[14px] cursor-pointer ${
-                              isDark
-                                ? "text-gray-100 hover:bg-white/10"
-                                : "text-gray-800 hover:bg-zinc-50"
-                            }`}
-                          >
-                            <span className="flex-1 text-left">
-                              {mode === "system"
-                                ? t("settings.general.appearance.system")
-                                : mode === "light"
-                                ? t("settings.general.appearance.light")
-                                : t("settings.general.appearance.dark")}
-                            </span>
-                            {appearanceMode === mode && (
-                              <Check className="h-4 w-4 text-gray-400" />
-                            )}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                  <SelectMenu
+                    value={appearanceMode}
+                    isDark={isDark}
+                    options={[
+                      {
+                        value: "system",
+                        label: t("settings.general.appearance.system"),
+                      },
+                      {
+                        value: "light",
+                        label: t("settings.general.appearance.light"),
+                      },
+                      {
+                        value: "dark",
+                        label: t("settings.general.appearance.dark"),
+                      },
+                    ]}
+                    onChange={(mode) => {
+                      const value =
+                        mode === "system" || mode === "light" || mode === "dark"
+                          ? mode
+                          : "system";
+                      setAppearanceMode(value);
+                      try {
+                        document.cookie = `va-theme-mode=${value}; path=/; max-age=31536000`;
+                      } catch {
+                        // ignore cookie errors
+                      }
+                      if (value === "system") {
+                        const prefersDark =
+                          typeof window !== "undefined" &&
+                          window.matchMedia &&
+                          window.matchMedia(
+                            "(prefers-color-scheme: dark)"
+                          ).matches;
+                        setTheme(prefersDark ? "dark" : "light");
+                      } else {
+                        setTheme(value);
+                      }
+                    }}
+                  />
                 </div>
               </section>
 
@@ -248,58 +208,24 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                       {t("settings.general.language.helper")}
                     </span>
                   </div>
-                  <div className="relative">
-                    <button
-                      type="button"
-                      onClick={() => setLanguageOpen((prev) => !prev)}
-                      className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium cursor-pointer ${
-                        isDark
-                          ? "bg-transparent text-gray-100 hover:bg-white/10"
-                          : "bg-transparent text-gray-800 hover:bg-zinc-100"
-                      }`}
-                    >
-                      <span>
-                        {locale === "es"
-                          ? t("settings.general.language.es")
-                          : t("settings.general.language.en")}
-                      </span>
-                      <ChevronDown className="h-4 w-4 opacity-80" />
-                    </button>
-                    {languageOpen && (
-                      <div
-                        className={`absolute right-0 z-40 mt-1 w-48 rounded-xl border shadow-lg backdrop-blur-sm ${
-                          isDark
-                            ? "border-white/10 bg-neutral-800/95"
-                            : "border-zinc-200 bg-white"
-                        }`}
-                      >
-                        {(["es", "en"] as const).map((code) => (
-                          <button
-                            key={code}
-                            type="button"
-                            onClick={() => {
-                              setLocale(code);
-                              setLanguageOpen(false);
-                            }}
-                            className={`flex w-full items-center gap-2 px-3 py-2 text-[14px] cursor-pointer ${
-                              isDark
-                                ? "text-gray-100 hover:bg-white/10"
-                                : "text-gray-800 hover:bg-zinc-50"
-                            }`}
-                          >
-                            <span className="flex-1 text-left">
-                              {code === "es"
-                                ? t("settings.general.language.es")
-                                : t("settings.general.language.en")}
-                            </span>
-                            {locale === code && (
-                              <Check className="h-4 w-4 text-gray-400" />
-                            )}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                  <SelectMenu
+                    value={locale}
+                    isDark={isDark}
+                    options={[
+                      {
+                        value: "es",
+                        label: t("settings.general.language.es"),
+                      },
+                      {
+                        value: "en",
+                        label: t("settings.general.language.en"),
+                      },
+                    ]}
+                    onChange={(code) => {
+                      const value = code === "es" || code === "en" ? code : "en";
+                      setLocale(value);
+                    }}
+                  />
                 </div>
               </section>
             </div>
@@ -310,6 +236,6 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
           )}
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }

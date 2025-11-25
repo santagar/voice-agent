@@ -16,6 +16,9 @@
   "chat.profile.name": "Alex Johnson",
   "chat.profile.email": "alex.johnson@example.com",
 
+  "chat.hero.title": "Hola, ¿cómo puedo ayudarte?",
+  "chat.hero.subtitle": "Empieza una nueva conversación con tu asistente de voz. Puedes hablar o escribir lo que necesites.",
+
   "chat.input.placeholderInCall": "Habla o escribe aquí…",
   "chat.input.placeholderIdle": "Pulsa el botón para iniciar la llamada",
   "chat.status.thinking": "El asistente está pensando…",

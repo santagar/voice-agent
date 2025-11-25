@@ -41,6 +41,7 @@ import {
   VoiceMessage,
 } from "@/lib/voice/useRealtimeVoiceSession";
 import { SettingsDialog } from "@/components/settings/SettingsDialog";
+import { IconButton } from "@/components/ui/IconButton";
 
 const START_CALL_PROMPT =
   "Arranca una conversación de voz amable y breve en español. Presentate y pregunta en qué puedes ayudar.";
@@ -120,6 +121,7 @@ export default function ChatClientPage({
   });
   const [configExpanded, setConfigExpanded] = useState(false);
   const [eventsExpanded, setEventsExpanded] = useState(true);
+  const [isNewChatLayout, setIsNewChatLayout] = useState(true);
   const { theme, toggleTheme } = useTheme();
   const isDark = theme === "dark";
   const { locale, setLocale, t } = useLocale();
@@ -160,21 +162,6 @@ export default function ChatClientPage({
     void sendUserMessage(prompt, { silent: true });
   }
 
-  // Ensure initial welcome message appears once
-  useEffect(() => {
-    setMessages((prev: VoiceMessage[]) =>
-      prev.length
-        ? prev
-        : [
-            {
-              id: "welcome",
-              from: "assistant",
-              text: "Hola, soy tu asistente. Toca el botón para empezar una llamada de voz.",
-            },
-          ]
-    );
-  }, [setMessages]);
-
   function scrollToBottom() {
     if (chatRef.current) {
       chatRef.current.scrollTop = chatRef.current.scrollHeight;
@@ -187,6 +174,19 @@ export default function ChatClientPage({
 
   function toggleMic() {
     voiceToggleMic();
+  }
+
+  function handleStartCall() {
+    setIsNewChatLayout(false);
+    startCall();
+  }
+
+  function handleSendText() {
+    const trimmed = input.trim();
+    if (!trimmed) return;
+    setIsNewChatLayout(false);
+    void sendUserMessage(trimmed);
+    setInput("");
   }
 
   const visibleMessages = useMemo(
@@ -395,17 +395,14 @@ export default function ChatClientPage({
           }
         >
           <div className="flex items-center gap-2 px-2 py-2">
-            <button
+            <IconButton
               onClick={() => {
                 if (sidebarCollapsed) {
                   setSidebarCollapsedAndPersist(false);
                 }
               }}
-              className={`group flex h-10 w-10 items-center justify-center rounded-xl bg-transparent transition ${
-                isDark
-                  ? "text-slate-100 hover:bg-white/5"
-                  : "text-slate-900 hover:bg-zinc-100"
-              }`}
+              className="group rounded-xl"
+              isDark={isDark}
               aria-label={
                 sidebarCollapsed
                   ? t("chat.aria.sidebar.expand")
@@ -420,15 +417,13 @@ export default function ChatClientPage({
               ) : (
                 <Aperture className="h-5 w-5" />
               )}
-            </button>
+            </IconButton>
             {!sidebarCollapsed && (
-              <button
-                className={`ml-auto flex h-10 w-10 items-center justify-center rounded-xl bg-transparent text-sm font-semibold transition ${
-                  isDark
-                    ? "text-gray-400 hover:bg-white/5 hover:text-gray-100"
-                    : "text-gray-500 hover:bg-zinc-100 hover:text-gray-900"
+              <IconButton
+                className={`ml-auto rounded-xl text-sm font-semibold ${
+                  isDark ? "text-gray-400" : "text-gray-500"
                 }`}
-                type="button"
+                isDark={isDark}
                 onClick={() => {
                   if (showMobileSidebar) {
                     setShowMobileSidebar(false);
@@ -450,7 +445,7 @@ export default function ChatClientPage({
                     </span>
                   </Tooltip>
                 )}
-              </button>
+              </IconButton>
             )}
           </div>
 
@@ -484,6 +479,7 @@ export default function ChatClientPage({
                     } else if (key === "new") {
                       setMessages([]);
                       setInput("");
+                      setIsNewChatLayout(true);
                     }
                   }}
                 >
@@ -594,12 +590,12 @@ export default function ChatClientPage({
           }`}
         >
           <header
-            className={`sticky top-0 z-20 flex flex-wrap items-center justify-between gap-2 border-b bg-transparent px-2 py-2 transition-colors sm:px-6 md:px-2 ${
+            className={`sticky top-0 z-20 flex flex-wrap items-center justify-between gap-2 border-b bg-transparent px-2 py-2 transition-colors ${
               showHeaderDivider ? "border-white/10" : "border-transparent"
             } relative`}
           >
-            <div className="flex items-center sm:gap-1.5">
-              <button
+            <div className="flex items-center gap-1.5">
+              <IconButton
                 onClick={() =>
                   setShowMobileSidebar((prev) => {
                     const next = !prev;
@@ -609,15 +605,13 @@ export default function ChatClientPage({
                     return next;
                   })
                 }
-                className={`flex h-10 w-10 items-center justify-center rounded-lg bg-transparent transition sm:hidden ${
-                  isDark
-                    ? "text-white hover:bg-white/5"
-                    : "text-slate-900 hover:bg-zinc-100"
+                className={`md:hidden rounded-lg ${
+                  isDark ? "text-white" : "text-slate-900"
                 }`}
                 aria-label={t("chat.aria.header.toggleMenu")}
               >
                 <Menu className="h-5 w-5" />
-              </button>
+              </IconButton>
               <div
                 className={`flex h-10 items-center gap-2 rounded-lg border px-3 transition ${
                   isDark
@@ -640,13 +634,10 @@ export default function ChatClientPage({
             </div>
 
             <div className="flex items-center gap-2">
-              <button
-                type="button"
-                className={`flex h-10 w-10 items-center justify-center rounded-lg border transition cursor-pointer ${
-                  isDark
-                    ? "border-transparent text-white hover:border-transparent hover:bg-white/5"
-                    : "border-transparent text-slate-800 hover:border-transparent hover:bg-zinc-100"
-                }`}
+              <IconButton
+                isDark={isDark}
+                variant="ghost"
+                className="rounded-lg"
                 onClick={() => setShowMenu((prev) => !prev)}
               >
                 <Tooltip label={t("chat.menu.moreOptions")}>
@@ -654,26 +645,31 @@ export default function ChatClientPage({
                     <Ellipsis className="h-5 w-5" />
                   </span>
                 </Tooltip>
-              </button>
-              <button
-                onClick={() => setShowMobileControls((prev) => !prev)}
-                className={`flex h-9 w-9 items-center justify-center rounded-xl border transition sm:hidden ${
+              </IconButton>
+              <IconButton
+                size="sm"
+                variant="outline"
+                isDark={isDark}
+                className={`sm:hidden rounded-xl ${
                   showMobileControls
-                    ? isDark
-                      ? "border-white/20 bg-white/10 text-white hover:border-white/40"
-                      : "border-zinc-300 bg-white text-slate-900 hover:border-zinc-400"
+                    ? ""
                     : isDark
-                    ? "border-white/10 bg-white/5 text-white/50 hover:border-white/20"
-                    : "border-zinc-200 bg-white/60 text-slate-700 hover:border-zinc-300"
+                    ? "text-white/50"
+                    : "text-slate-700"
                 }`}
+                onClick={() => setShowMobileControls((prev) => !prev)}
                 aria-label={
                   showMobileControls
                     ? t("chat.aria.mobileControls.hide")
                     : t("chat.aria.mobileControls.show")
                 }
               >
-                <Grip className={`h-4 w-4 ${showMobileControls ? "opacity-100" : "opacity-60"}`} />
-              </button>
+                <Grip
+                  className={`h-4 w-4 ${
+                    showMobileControls ? "opacity-100" : "opacity-60"
+                  }`}
+                />
+              </IconButton>
             </div>
           </header>
 
@@ -718,6 +714,86 @@ export default function ChatClientPage({
               ref={chatRef}
               className="flex-1 overflow-y-auto pt-6 pb-4 pr-1"
             >
+              {isNewChatLayout && visibleMessages.length === 0 && (
+                <div className="mx-auto flex w-full max-w-3xl flex-col items-center justify-center px-1 pt-48 pb-16 text-center">
+                  <h1
+                    className={`text-3xl font-semibold tracking-tight ${
+                      isDark ? "text-white" : "text-slate-900"
+                    }`}
+                  >
+                    {t("chat.hero.title")}
+                  </h1>
+                  <p
+                    className={`mt-2 max-w-2xl text-sm ${
+                      isDark ? "text-gray-300" : "text-gray-600"
+                    }`}
+                  >
+                    {t("chat.hero.subtitle")}
+                  </p>
+                  <div className="mt-6 w-full max-w-3xl">
+                    <div className="relative">
+                      <input
+                        type="text"
+                        ref={inputRef}
+                        className={`h-14 w-full rounded-full border pl-5 pr-16 text-base placeholder:text-neutral-400 focus:outline-none ${
+                          isDark
+                            ? "border-white/10 bg-white/10 text-slate-100"
+                            : "border-zinc-300 bg-white text-slate-900"
+                        }`}
+                        placeholder={t("chat.input.placeholderIdle")}
+                        value={input}
+                        onChange={(e) => setInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            handleSendText();
+                          }
+                        }}
+                        disabled={!wsConnected}
+                      />
+                      <Tooltip
+                        placement="above"
+                        offset={12}
+                        label={
+                          hasTypedInput
+                            ? t("chat.tooltip.send")
+                            : t("chat.tooltip.startVoiceCall")
+                        }
+                      >
+                        <button
+                          onClick={() => {
+                            if (hasTypedInput) {
+                              handleSendText();
+                            } else if (
+                              callStatus !== "calling" &&
+                              callStatus !== "in_call"
+                            ) {
+                              handleStartCall();
+                            }
+                          }}
+                          className={`absolute right-2 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border text-base font-semibold transition focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed ${
+                            hasTypedInput
+                              ? isDark
+                                ? "border-white/20 bg-white/10 text-white hover:bg-white/20 cursor-pointer"
+                                : "border-zinc-300 bg-zinc-100 text-slate-900 hover:border-zinc-400 hover:bg-zinc-200 cursor-pointer"
+                              : isDark
+                              ? "border-white/30 bg-white/15 text-white/80 hover:border-white/40 hover:bg-white/25 hover:text-white cursor-pointer"
+                              : "border-zinc-300 bg-zinc-100 text-slate-800 hover:border-zinc-400 hover:bg-zinc-200 cursor-pointer"
+                          }`}
+                          disabled={!wsConnected || callStatus === "calling"}
+                        >
+                          {hasTypedInput ? (
+                            <ArrowUp className="h-5 w-5" />
+                          ) : (
+                            <AudioLines className="h-5 w-5" />
+                          )}
+                        </button>
+                      </Tooltip>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="mx-auto flex max-w-3xl flex-col gap-6">
                 {visibleMessages.map((message, idx) => {
                   const isAssistant = message.from === "assistant";
@@ -733,36 +809,32 @@ export default function ChatClientPage({
                             className="flex items-center gap-1"
                             style={{ opacity: isLast ? 1 : 1 }}
                           >
-                            <button
-                              type="button"
+                            <IconButton
+                              size="sm"
+                              isDark={isDark}
+                              variant="ghost"
+                              className="rounded-lg"
                               onClick={() => void handleCopy(message.text)}
-                              className={`flex h-9 w-9 items-center justify-center rounded-lg transition cursor-pointer ${
-                                isDark
-                                  ? "text-white/70 hover:bg-white/10 hover:text-white"
-                                  : "text-slate-700 hover:bg-zinc-100 hover:text-slate-900"
-                              }`}
                             >
                               <Tooltip label={t("chat.tooltip.copy")}>
                                 <span>
                                   <Copy className="h-5 w-5" />
                                 </span>
                               </Tooltip>
-                            </button>
-                            <button
-                              type="button"
+                            </IconButton>
+                            <IconButton
+                              size="sm"
+                              isDark={isDark}
+                              variant="ghost"
+                              className="rounded-lg"
                               onClick={() => void speak(message.text)}
-                              className={`flex h-9 w-9 items-center justify-center rounded-lg transition cursor-pointer ${
-                                isDark
-                                  ? "text-white/70 hover:bg-white/10 hover:text-white"
-                                  : "text-slate-700 hover:bg-zinc-100 hover:text-slate-900"
-                              }`}
                             >
                               <Tooltip label={t("chat.tooltip.playAudio")}>
                                 <span>
                                   <Volume2 className="h-5 w-5" />
                                 </span>
                               </Tooltip>
-                            </button>
+                            </IconButton>
                           </div>
                         )}
                       </div>
@@ -1089,89 +1161,89 @@ export default function ChatClientPage({
               </div>
             )}
 
-            <div className="mx-auto w-full max-w-3xl px-2 sm:px-4">
-              <div className="flex items-center gap-3">
-                <div className="relative flex-1">
-                  <input
-                    type="text"
-                    ref={inputRef}
-                    className={`h-14 w-full rounded-full border pl-5 pr-16 text-base placeholder:text-neutral-400 focus:outline-none ${
-                      isDark
-                        ? "border-white/10 bg-white/10 text-slate-100"
-                        : "border-zinc-300 bg-white text-slate-900"
-                    }`}
-                    placeholder={
-                      callStatus === "in_call"
-                        ? t("chat.input.placeholderInCall")
-                        : t("chat.input.placeholderIdle")
-                    }
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        if (input.trim()) {
-                          void sendUserMessage(input);
-                          setInput("");
-                        }
+            {!isNewChatLayout && (
+              <div className="mx-auto w-full max-w-3xl px-1 sm:px-1">
+                <div className="flex items-center gap-3">
+                  <div className="relative flex-1">
+                    <input
+                      type="text"
+                      ref={inputRef}
+                      className={`h-14 w-full rounded-full border pl-5 pr-16 text-base placeholder:text-neutral-400 focus:outline-none ${
+                        isDark
+                          ? "border-white/10 bg-white/10 text-slate-100"
+                          : "border-zinc-300 bg-white text-slate-900"
+                      }`}
+                      placeholder={
+                        callStatus === "in_call"
+                          ? t("chat.input.placeholderInCall")
+                          : t("chat.input.placeholderIdle")
                       }
-                    }}
-                    disabled={!wsConnected}
-                  />
-                  <Tooltip
-                    placement="above"
-                    offset={12}
-                    label={
-                      hasTypedInput
-                        ? t("chat.tooltip.send")
-                        : callStatus === "in_call"
-                        ? t("chat.tooltip.endCall")
-                        : t("chat.tooltip.startVoiceCall")
-                    }
-                  >
-                    <button
-                      onClick={() => {
-                        if (hasTypedInput) {
-                          void sendUserMessage(input);
-                          setInput("");
-                        } else {
-                          if (callStatus === "calling") return;
-                          if (callStatus === "in_call") {
-                            endCall();
-                          } else {
-                            startCall();
+                      value={input}
+                      onChange={(e) => setInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          if (input.trim()) {
+                            handleSendText();
                           }
                         }
                       }}
-                      className={`absolute right-2 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border text-base font-semibold transition focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed ${
+                      disabled={!wsConnected}
+                    />
+                    <Tooltip
+                      placement="above"
+                      offset={12}
+                      label={
                         hasTypedInput
-                          ? isDark
-                            ? "border-white/20 bg-white/10 text-white hover:bg-white/20 cursor-pointer"
-                            : "border-zinc-300 bg-zinc-100 text-slate-900 hover:border-zinc-400 hover:bg-zinc-200 cursor-pointer"
+                          ? t("chat.tooltip.send")
                           : callStatus === "in_call"
-                          ? "border-rose-400/70 bg-rose-500/90 text-white hover:bg-rose-400 cursor-pointer"
-                          : isDark
-                          ? "border-white/30 bg-white/15 text-white/80 hover:border-white/40 hover:bg-white/25 hover:text-white cursor-pointer"
-                          : "border-zinc-300 bg-zinc-100 text-slate-800 hover:border-zinc-400 hover:bg-zinc-200 cursor-pointer"
-                      }`}
-                      disabled={
-                        hasTypedInput
-                          ? !wsConnected
-                          : !wsConnected || callStatus === "calling"
+                          ? t("chat.tooltip.endCall")
+                          : t("chat.tooltip.startVoiceCall")
                       }
                     >
-                      {hasTypedInput ? (
-                        <ArrowUp className="h-5 w-5" />
-                      ) : callStatus === "in_call" ? (
-                        <X className="h-5 w-5" />
-                      ) : (
-                        <AudioLines className="h-5 w-5" />
-                      )}
-                    </button>
-                  </Tooltip>
+                      <button
+                        onClick={() => {
+                          if (hasTypedInput) {
+                            handleSendText();
+                          } else {
+                            if (callStatus === "calling") return;
+                            if (callStatus === "in_call") {
+                              endCall();
+                            } else {
+                              handleStartCall();
+                            }
+                          }
+                        }}
+                        className={`absolute right-2 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border text-base font-semibold transition focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed ${
+                          hasTypedInput
+                            ? isDark
+                              ? "border-white/20 bg-white/10 text-white hover:bg-white/20 cursor-pointer"
+                              : "border-zinc-300 bg-zinc-100 text-slate-900 hover:border-zinc-400 hover:bg-zinc-200 cursor-pointer"
+                            : callStatus === "in_call"
+                            ? "border-rose-400/70 bg-rose-500/90 text-white hover:bg-rose-400 cursor-pointer"
+                            : isDark
+                            ? "border-white/30 bg-white/15 text-white/80 hover:border-white/40 hover:bg-white/25 hover:text-white cursor-pointer"
+                            : "border-zinc-300 bg-zinc-100 text-slate-800 hover:border-zinc-400 hover:bg-zinc-200 cursor-pointer"
+                        }`}
+                        disabled={
+                          hasTypedInput
+                            ? !wsConnected
+                            : !wsConnected || callStatus === "calling"
+                        }
+                      >
+                        {hasTypedInput ? (
+                          <ArrowUp className="h-5 w-5" />
+                        ) : callStatus === "in_call" ? (
+                          <X className="h-5 w-5" />
+                        ) : (
+                          <AudioLines className="h-5 w-5" />
+                        )}
+                      </button>
+                    </Tooltip>
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
 
             {showMobileControls && (
               <div className="sm:hidden">
@@ -1207,7 +1279,7 @@ export default function ChatClientPage({
                       if (callStatus === "in_call") {
                         endCall();
                       } else if (callStatus !== "calling") {
-                        startCall();
+                        handleStartCall();
                       }
                     }}
                     className={`flex h-16 w-16 items-center justify-center rounded-full border text-white transition active:scale-95 ${
