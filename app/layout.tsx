@@ -16,14 +16,14 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Voice Agent Lab",
+  title: "Voice Agent",
   description:
-    "Prototype voice assistants with OpenAI Realtime, TTS, and Pinecone vectors directly from the Lab.",
+    "Prototype voice assistants with OpenAI Realtime, TTS, and Pinecone vectors.",
   icons: {
     icon: [
       { url: "/favicon.ico", sizes: "any" },
       { url: "/icon.png", type: "image/png", sizes: "512x512" },
-      { url: "/audio-lines.svg", type: "image/svg+xml" },
+      { url: "/aperture.svg", type: "image/svg+xml" },
     ],
   },
 };

@@ -4,7 +4,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 type TooltipProps = {
-  label: string;
+  label: React.ReactNode;
   children: React.ReactElement<any>;
   placement?: "auto" | "above" | "below";
   offset?: number;
@@ -77,7 +77,7 @@ export function Tooltip({
   const hide = () => setVisible(false);
 
   const child = React.cloneElement(children as React.ReactElement<any>, {
-    "aria-label": label,
+    "aria-label": typeof label === "string" ? label : undefined,
   });
 
   return (

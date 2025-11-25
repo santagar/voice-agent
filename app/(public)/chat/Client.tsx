@@ -8,6 +8,7 @@ import React, {
   useState,
 } from "react";
 import {
+  Aperture,
   ArrowUp,
   AudioLines,
   Bug,
@@ -413,11 +414,11 @@ export default function ChatClientPage({
             >
               {sidebarCollapsed ? (
                 <>
-                  <AudioLines className="h-5 w-5 group-hover:hidden" />
+                  <Aperture className="h-5 w-5 group-hover:hidden" />
                   <PanelLeft className="hidden h-5 w-5 group-hover:inline-block" />
                 </>
               ) : (
-                <AudioLines className="h-5 w-5" />
+                <Aperture className="h-5 w-5" />
               )}
             </button>
             {!sidebarCollapsed && (
@@ -462,6 +463,14 @@ export default function ChatClientPage({
                   ? Search
                   : Settings;
               const Icon = icon;
+              const label =
+                key === "new"
+                  ? t("chat.sidebar.newChat")
+                  : key === "search"
+                  ? t("chat.sidebar.search")
+                  : t("chat.sidebar.settings");
+              const shortcut =
+                key === "new" ? "⇧ ⌘ O" : key === "search" ? "⌘ K" : "";
               return (
                 <button
                   key={key}
@@ -479,13 +488,26 @@ export default function ChatClientPage({
                   }}
                 >
                   {sidebarCollapsed ? (
-                    <div className="flex w-full justify-center">
-                      <Icon
-                        className={`h-5 w-5 ${
-                          isDark ? "text-slate-200" : "text-slate-700"
-                        }`}
-                      />
-                    </div>
+                    <Tooltip
+                      label={
+                        shortcut ? (
+                          <span className="flex items-center gap-2">
+                            <span>{label}</span>
+                            <span className="text-zinc-400">{shortcut}</span>
+                          </span>
+                        ) : (
+                          label
+                        )
+                      }
+                    >
+                      <div className="flex w-full justify-center">
+                        <Icon
+                          className={`h-5 w-5 ${
+                            isDark ? "text-slate-200" : "text-slate-700"
+                          }`}
+                        />
+                      </div>
+                    </Tooltip>
                   ) : (
                     <>
                       <div className="flex flex-1 items-center gap-3">

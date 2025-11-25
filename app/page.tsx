@@ -1,6 +1,6 @@
 import Link from "next/link";
 import Image from "next/image";
-import { AudioLines } from "lucide-react";
+import { Aperture } from "lucide-react";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 
 export default function Home() {
@@ -9,7 +9,7 @@ export default function Home() {
       <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
         <div className="flex w-full items-center justify-between">
           <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-zinc-200/70 bg-zinc-50 text-zinc-900 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50">
-            <AudioLines className="h-9 w-9" strokeWidth={1.6} />
+            <Aperture className="h-9 w-9" strokeWidth={1.6} />
           </div>
           <ThemeToggle />
         </div>
