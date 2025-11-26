@@ -14,7 +14,7 @@
   "chat.sidebar.close": "Close sidebar",
 
   "chat.profile.name": "Alex Johnson",
-  "chat.profile.email": "alex.johnson@example.com",
+  "chat.profile.email": "user@example.com",
 
   "chat.hero.title": "What can I help with?",
   "chat.hero.subtitle": "Start a new conversation with your voice assistant. You can speak or type whatever you need.",
@@ -48,6 +48,29 @@
   "chat.tooltip.unmuteSpeaker": "Unmute speaker",
   "chat.tooltip.muteMic": "Mute microphone",
   "chat.tooltip.unmuteMic": "Unmute microphone",
+
+  "chat.login.open": "Log in",
+  "chat.login.close": "Close login",
+  "chat.login.title": "Log in or sign up",
+  "chat.login.subtitle": "You'll get smarter responses and can upload files, images, and more.",
+  "chat.login.withGoogle": "Continue with Google",
+  "chat.login.withApple": "Continue with Apple",
+  "chat.login.withMicrosoft": "Continue with Microsoft",
+  "chat.login.withPhone": "Continue with phone",
+  "chat.login.or": "OR",
+  "chat.login.emailPlaceholder": "Email address",
+  "chat.login.continue": "Continue",
+  "chat.login.continueLoading": "Continuing…",
+
+  "chat.userMenu.title": "Account",
+  "chat.userMenu.logout": "Log out",
+  "chat.userMenu.personalAccount": "Personal account",
+  "chat.userMenu.adminAccount": "Administrator",
+  "chat.userMenu.addTeammates": "Add teammates",
+  "chat.userMenu.workspaceSettings": "Workspace settings",
+  "chat.userMenu.personalization": "Personalization",
+  "chat.userMenu.settings": "Settings",
+  "chat.userMenu.help": "Help",
 
   "settings.title": "Settings",
   "settings.close": "Close settings",

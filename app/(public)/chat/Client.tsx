@@ -15,6 +15,9 @@ import {
   Copy,
   Ellipsis,
   Grip,
+  CircleQuestionMark,
+  HelpCircle,
+  LogOut,
   Menu,
   MessageSquare,
   Mic,
@@ -26,9 +29,11 @@ import {
   Settings,
   Sun,
   User,
+  UserCircle2,
+  UserPlus,
   Volume2,
   VolumeX,
-  X,
+  Wand2,
 } from "lucide-react";
 import { ChatBubble } from "@/components/ui/ChatBubble";
 import { MarkdownMessage } from "@/components/ui/MarkdownMessage";
@@ -42,16 +47,23 @@ import {
 } from "@/lib/voice/useRealtimeVoiceSession";
 import { SettingsDialog } from "@/components/settings/SettingsDialog";
 import { IconButton } from "@/components/ui/IconButton";
+import { LoginDialog } from "@/components/auth/LoginDialog";
+import { signOut } from "next-auth/react";
+import { useRouter } from "next/navigation";
 
 const START_CALL_PROMPT =
   "Arranca una conversación de voz amable y breve en español. Presentate y pregunta en qué puedes ayudar.";
 
 type ChatClientProps = {
   initialSidebarCollapsed: boolean;
+  initialLoggedIn?: boolean;
+  initialUserEmail?: string | null;
 };
 
 export default function ChatClientPage({
   initialSidebarCollapsed,
+  initialLoggedIn = false,
+  initialUserEmail = null,
 }: ChatClientProps) {
   const {
     messages,
@@ -121,6 +133,12 @@ export default function ChatClientPage({
   });
   const [configExpanded, setConfigExpanded] = useState(false);
   const [eventsExpanded, setEventsExpanded] = useState(true);
+  const [loggedIn, setLoggedIn] = useState(initialLoggedIn);
+  const [showLoginDialog, setShowLoginDialog] = useState(false);
+  const [userEmail, setUserEmail] = useState<string | null>(initialUserEmail);
+  const [showUserMenu, setShowUserMenu] = useState(false);
+  const router = useRouter();
+  const isAdminUser = userEmail === "santagar@gmail.com";
   const [isNewChatLayout, setIsNewChatLayout] = useState(true);
   const { theme, toggleTheme } = useTheme();
   const isDark = theme === "dark";
@@ -373,7 +391,7 @@ export default function ChatClientPage({
     >
           <div className="flex h-screen overflow-hidden">
         <aside
-          className={`flex-col border-r backdrop-blur-xl transition-[transform] duration-300 ${
+          className={`relative flex-col border-r backdrop-blur-xl transition-[transform] duration-300 ${
             isDark
               ? sidebarCollapsed
                 ? "border-white/5 bg-neutral-800/80"
@@ -435,7 +453,7 @@ export default function ChatClientPage({
                 {showMobileSidebar ? (
                   <Tooltip label={t("chat.sidebar.close")}>
                     <span>
-                      <X className="h-5 w-5" />
+                      <LogOut className="h-5 w-5" />
                     </span>
                   </Tooltip>
                 ) : (
@@ -541,41 +559,182 @@ export default function ChatClientPage({
             })}
           </div>
 
-          <div className="mt-auto px-2 py-3">
-            <button
-              type="button"
-              className={`group flex items-center rounded-xl px-2 py-2 text-left text-sm transition ${
-                sidebarCollapsed
-                  ? "h-10 w-10 justify-center mx-auto"
-                  : "w-full gap-3"
-              } ${isDark ? "hover:bg-white/5" : "hover:bg-zinc-100"}`}
+          {loggedIn && (
+            <div className="mt-auto px-2 py-3">
+              <button
+                type="button"
+                onClick={() => setShowUserMenu((prev) => !prev)}
+                className={`group flex items-center rounded-xl px-2 py-2 text-left text-sm transition ${
+                  sidebarCollapsed
+                    ? "mx-auto h-10 w-10 justify-center"
+                    : "w-full gap-3"
+                } ${isDark ? "hover:bg-white/5" : "hover:bg-zinc-100"}`}
+              >
+                <User
+                  className={`h-6 w-6 ${
+                    isDark ? "text-slate-200" : "text-slate-700"
+                  }`}
+                />
+                {!sidebarCollapsed && (
+                  <div className="ml-2 flex flex-col">
+                    <span
+                      className={`text-sm font-medium ${
+                        isDark ? "text-slate-100" : "text-slate-900"
+                      }`}
+                    >
+                      {userEmail || t("chat.profile.email")}
+                    </span>
+                  </div>
+                )}
+              </button>
+            </div>
+          )}
+        </aside>
+
+        {loggedIn && showUserMenu && (
+          <>
+            <div
+              className="fixed inset-0 z-40"
+              onClick={() => setShowUserMenu(false)}
+              aria-hidden
+            />
+            <div
+              className={`fixed bottom-20 left-4 z-50 w-72 rounded-3xl border shadow-lg backdrop-blur-sm ${
+                isDark
+                  ? "border-white/10 bg-neutral-900/95"
+                  : "border-zinc-200 bg-white"
+              }`}
             >
-              <User
-                className={`h-6 w-6 ${
-                  isDark ? "text-slate-200" : "text-slate-700"
+              <div className="px-4 pt-3 pb-2">
+                <div className="flex items-center justify-between gap-2 text-sm text-gray-500">
+                  <div className="flex items-center gap-2">
+                    <UserCircle2 className="h-4 w-4" />
+                    <span className="truncate">{userEmail}</span>
+                  </div>
+                  <button
+                    type="button"
+                    className={`flex h-6 w-6 items-center justify-center rounded-full text-xs ${
+                      isDark
+                        ? "text-gray-300 hover:bg-white/10"
+                        : "text-gray-500 hover:bg-zinc-100"
+                    }`}
+                  >
+                    +
+                  </button>
+                </div>
+                {isAdminUser && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      router.push("/admin");
+                      setShowUserMenu(false);
+                    }}
+                    className={`mt-3 flex w-full items-center justify-between rounded-2xl px-3 py-2 ${
+                      isDark
+                        ? "bg-sky-500/20 hover:bg-sky-500/30 cursor-pointer"
+                        : "bg-sky-500/10 hover:bg-sky-500/20 cursor-pointer"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-sky-500 text-[11px] font-semibold text-white">
+                        A
+                      </span>
+                      <span className="text-xs font-medium text-gray-900 dark:text-gray-50">
+                        {t("chat.userMenu.adminAccount")}
+                      </span>
+                    </div>
+                  </button>
+                )}
+              </div>
+              <div
+                className={`my-1 border-t ${
+                  isDark ? "border-white/10" : "border-zinc-200"
                 }`}
               />
-              {!sidebarCollapsed && (
-                <div className="ml-2 flex flex-col">
-                  <span
-                    className={`text-sm font-medium ${
-                      isDark ? "text-slate-100" : "text-slate-900"
-                    }`}
-                  >
-                    {t("chat.profile.name")}
-                  </span>
-                  <span
-                    className={`text-xs ${
-                      isDark ? "text-slate-400" : "text-slate-500"
-                    }`}
-                  >
-                    {t("chat.profile.email")}
-                  </span>
-                </div>
-              )}
-            </button>
-          </div>
-        </aside>
+              <div className="py-1 px-2 text-xs">
+                <button
+                  type="button"
+                  className={`mb-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm ${
+                    isDark
+                      ? "text-gray-100 hover:bg-white/5"
+                      : "text-gray-800 hover:bg-zinc-50"
+                  }`}
+                >
+                  <UserPlus className="h-4 w-4" />
+                  <span>{t("chat.userMenu.addTeammates")}</span>
+                </button>
+                <button
+                  type="button"
+                  className={`mb-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm ${
+                    isDark
+                      ? "text-gray-100 hover:bg-white/5"
+                      : "text-gray-800 hover:bg-zinc-50"
+                  }`}
+                >
+                  <PanelLeft className="h-4 w-4" />
+                  <span>{t("chat.userMenu.workspaceSettings")}</span>
+                </button>
+                <button
+                  type="button"
+                  className={`mb-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm ${
+                    isDark
+                      ? "text-gray-100 hover:bg-white/5"
+                      : "text-gray-800 hover:bg-zinc-50"
+                  }`}
+                >
+                  <Wand2 className="h-4 w-4" />
+                  <span>{t("chat.userMenu.personalization")}</span>
+                </button>
+                <button
+                  type="button"
+                  className={`mb-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm ${
+                    isDark
+                      ? "text-gray-100 hover:bg-white/5"
+                      : "text-gray-800 hover:bg-zinc-50"
+                  }`}
+                >
+                  <Settings className="h-4 w-4" />
+                  <span>{t("chat.userMenu.settings")}</span>
+                </button>
+              </div>
+              <div
+                className={`my-1 border-t ${
+                  isDark ? "border-white/10" : "border-zinc-200"
+                }`}
+              />
+              <div className="pb-3 px-2 text-xs">
+                <button
+                  type="button"
+                  className={`mb-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm text-left ${
+                    isDark
+                      ? "text-gray-100 hover:bg-white/5"
+                      : "text-gray-800 hover:bg-zinc-50"
+                  }`}
+                >
+                  <HelpCircle className="h-4 w-4" />
+                  <span>{t("chat.userMenu.help")}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await signOut({ redirect: false });
+                    setLoggedIn(false);
+                    setUserEmail(null);
+                    setShowUserMenu(false);
+                  }}
+                  className={`mb-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium cursor-pointer ${
+                    isDark
+                      ? "text-gray-100 hover:bg-white/5"
+                      : "text-gray-800 hover:bg-zinc-50"
+                  }`}
+                >
+                  <LogOut className="h-4 w-4" />
+                  <span>{t("chat.userMenu.logout")}</span>
+                </button>
+              </div>
+            </div>
+          </>
+        )}
 
         {showMobileSidebar && (
           <div
@@ -634,18 +793,44 @@ export default function ChatClientPage({
             </div>
 
             <div className="flex items-center gap-2">
-              <IconButton
-                isDark={isDark}
-                variant="ghost"
-                className="rounded-lg"
-                onClick={() => setShowMenu((prev) => !prev)}
-              >
-                <Tooltip label={t("chat.menu.moreOptions")}>
-                  <span>
-                    <Ellipsis className="h-5 w-5" />
-                  </span>
-                </Tooltip>
-              </IconButton>
+              {loggedIn ? (
+                <IconButton
+                  isDark={isDark}
+                  variant="ghost"
+                  className="rounded-lg"
+                  onClick={() => setShowMenu((prev) => !prev)}
+                >
+                  <Tooltip label={t("chat.menu.moreOptions")}>
+                    <span>
+                      <Ellipsis className="h-5 w-5" />
+                    </span>
+                  </Tooltip>
+                </IconButton>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setShowLoginDialog(true)}
+                  className={`inline-flex cursor-pointer rounded-full px-4 py-2 text-sm font-medium ${
+                    isDark
+                      ? "bg-white text-neutral-900 hover:bg-gray-100"
+                      : "bg-black text-white hover:bg-neutral-900"
+                  }`}
+                >
+                  {t("chat.login.open")}
+                </button>
+              )}
+              {!loggedIn && (
+                <button
+                  type="button"
+                  className={`flex h-9 w-9 items-center justify-center rounded-full text-xs font-semibold cursor-pointer ${
+                    isDark
+                      ? "text-white hover:bg-white/10"
+                      : "text-slate-800 hover:bg-zinc-100"
+                  }`}
+                >
+                  <CircleQuestionMark className="h-5 w-5" />
+                </button>
+              )}
               <IconButton
                 size="sm"
                 variant="outline"
@@ -673,7 +858,7 @@ export default function ChatClientPage({
             </div>
           </header>
 
-          {showMenu && (
+          {loggedIn && showMenu && (
             <>
               <div
                 className="fixed inset-0 z-20"
@@ -983,7 +1168,7 @@ export default function ChatClientPage({
                     }`}
                     aria-label="Close debug panel"
                   >
-                    <X className="h-3 w-3" />
+                    <LogOut className="h-3 w-3" />
                   </button>
 
                   <div
@@ -1234,7 +1419,7 @@ export default function ChatClientPage({
                         {hasTypedInput ? (
                           <ArrowUp className="h-5 w-5" />
                         ) : callStatus === "in_call" ? (
-                          <X className="h-5 w-5" />
+                          <LogOut className="h-5 w-5" />
                         ) : (
                           <AudioLines className="h-5 w-5" />
                         )}
@@ -1341,6 +1526,15 @@ export default function ChatClientPage({
       <SettingsDialog
         open={showSettingsDialog}
         onClose={() => setShowSettingsDialog(false)}
+      />
+      <LoginDialog
+        open={showLoginDialog}
+        onClose={() => setShowLoginDialog(false)}
+        onLoggedIn={(email) => {
+          setLoggedIn(true);
+          setUserEmail(email);
+          setShowLoginDialog(false);
+        }}
       />
     </main>
   );

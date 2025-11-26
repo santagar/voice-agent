@@ -31,7 +31,6 @@ export function Modal({ open, onClose, children }: ModalProps) {
       aria-hidden
     >
       <div
-        className="w-full max-w-2xl"
         onClick={(event) => event.stopPropagation()}
       >
         {children}
@@ -39,4 +38,3 @@ export function Modal({ open, onClose, children }: ModalProps) {
     </div>
   );
 }
-

@@ -1,41 +1,31 @@
 # Voice Agent
 
-Voice Agent is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+Voice Agent is a **Realtime voice assistant** built on Next.js, an OpenAI Realtime bridge, and a small RAG layer.
 
 ## Getting Started
 
-First, run the development server:
+Run the development stack (Next.js app + Realtime bridge):
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm run dev:all
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Then open [http://localhost:3000](http://localhost:3000) in your browser.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Public routes
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- `/` – main voice chat UI (aliased to the `/chat` page).
+- `/chat` – same experience as `/`, kept for clarity and deep-linking.
 
-## Learn More
+All 404s are redirected back to `/` so the chat is always the entry point.
 
-To learn more about Next.js, take a look at the following resources:
+### Admin routes
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- `/admin/login` – simple password-based login for the backoffice.
+- `/admin` – protected admin home (requires a valid admin session cookie).
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Admin access is controlled via the `ADMIN_PASSWORD` environment variable
+(falls back to `admin123` in development if not set).
 
 # 🧠 Architecture Overview
 
@@ -58,8 +48,7 @@ Next.js frontend (chat UI + AudioContext)
 ## Components
 
 - **Next.js app (`app/*`)**
-  - `/chat`: main chat + voice view (MVP).
-  - `/assistant`: baseline demo view (optional).
+  - `/` and `/chat`: main chat + voice view (MVP).
   - `/api/*`: HTTP endpoints for tools, scopes, STT, and intent classification.
 
 - **Shared voice hook (`lib/voice/useRealtimeVoiceSession.ts`)**
@@ -218,6 +207,22 @@ Frontend tuning:
 - `NEXT_PUBLIC_VAD_NOISE_FACTOR` – multiplier over the noise floor to adjust sensitivity.
 - `NEXT_PUBLIC_BARGE_IN_MIN_MS` – minimum ms of continuous voice before barge‑in kicks in.
 - `NEXT_PUBLIC_USE_VOICE_TRANSCRIBE` – when set to `"false"`, runs in “pure voice” mode: user voice utterances are not sent to `/api/transcribe` or `/api/voice-intent`, and no user chat bubbles are created from voice; Realtime still consumes audio directly via the bridge and handles reasoning + tools.
+
+Authentication:
+
+- `NEXTAUTH_SECRET` – required by Auth.js (NextAuth) to sign and encrypt session JWTs.  
+  Use a long random string, for example:
+  ```bash
+  openssl rand -base64 32
+  ```
+- `NEXTAUTH_URL` – base URL of the app (e.g. `http://localhost:3000` in dev).
+
+Auth.js is wired with a simple **email credentials** provider:
+
+- Submitting an email in the login modal calls `signIn("credentials", { email })`.
+- Any non‑empty email is accepted and becomes a lightweight demo user (`id = email`).
+- The server reads the session via `getServerSession(authOptions)` to decide if the user is logged in.
+- Admin access to `/admin` is currently hard‑coded to the email `santagar@gmail.com` via the protected admin layout.
 
 External APIs for business tools:
 
