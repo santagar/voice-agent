@@ -14,8 +14,8 @@ import {
 } from "lucide-react";
 import { useTheme } from "@/components/theme/ThemeContext";
 import { useLocale } from "@/components/locale/LocaleContext";
-import { Modal } from "@/components/ui/Modal";
-import { SelectMenu } from "@/components/ui/SelectMenu";
+import { Modal } from "@/components/front/ui/Modal";
+import { SelectMenu } from "@/components/front/ui/SelectMenu";
 
 type SettingsDialogProps = {
   open: boolean;

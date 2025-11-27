@@ -19,13 +19,11 @@ Then open [http://localhost:3000](http://localhost:3000) in your browser.
 
 All 404s are redirected back to `/` so the chat is always the entry point.
 
-### Admin routes
+### Platform routes
 
-- `/admin/login` – simple password-based login for the backoffice.
-- `/admin` – protected admin home (requires a valid admin session cookie).
+- `/platform` – protected platform backoffice (requires an authenticated session).
 
-Admin access is controlled via the `ADMIN_PASSWORD` environment variable
-(falls back to `admin123` in development if not set).
+Platform access is currently limited to a single admin email (see Authentication section).
 
 # 🧠 Architecture Overview
 
@@ -222,7 +220,7 @@ Auth.js is wired with a simple **email credentials** provider:
 - Submitting an email in the login modal calls `signIn("credentials", { email })`.
 - Any non‑empty email is accepted and becomes a lightweight demo user (`id = email`).
 - The server reads the session via `getServerSession(authOptions)` to decide if the user is logged in.
-- Admin access to `/admin` is currently hard‑coded to the email `santagar@gmail.com` via the protected admin layout.
+- Admin access to `/platform` is currently hard‑coded to the email `santagar@gmail.com` via the protected platform layout.
 
 External APIs for business tools:
 

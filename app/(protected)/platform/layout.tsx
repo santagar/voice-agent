@@ -5,7 +5,7 @@ import { authOptions } from "@/lib/auth/options";
 
 const ADMIN_EMAIL = "santagar@gmail.com";
 
-export default async function AdminProtectedLayout({
+export default async function PlatformProtectedLayout({
   children,
 }: {
   children: ReactNode;

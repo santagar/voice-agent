@@ -30,11 +30,8 @@ export function Modal({ open, onClose, children }: ModalProps) {
       onClick={onClose}
       aria-hidden
     >
-      <div
-        onClick={(event) => event.stopPropagation()}
-      >
-        {children}
-      </div>
+      <div onClick={(event) => event.stopPropagation()}>{children}</div>
     </div>
   );
 }
+

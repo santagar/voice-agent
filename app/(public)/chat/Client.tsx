@@ -34,10 +34,11 @@ import {
   Volume2,
   VolumeX,
   Wand2,
+  X,
 } from "lucide-react";
-import { ChatBubble } from "@/components/ui/ChatBubble";
-import { MarkdownMessage } from "@/components/ui/MarkdownMessage";
-import { Tooltip } from "@/components/ui/Tooltip";
+import { ChatBubble } from "@/components/front/ui/ChatBubble";
+import { MarkdownMessage } from "@/components/front/ui/MarkdownMessage";
+import { Tooltip } from "@/components/front/ui/Tooltip";
 import { labTheme } from "@/lib/theme";
 import { useTheme } from "@/components/theme/ThemeContext";
 import { useLocale } from "@/components/locale/LocaleContext";
@@ -45,8 +46,8 @@ import {
   useRealtimeVoiceSession,
   VoiceMessage,
 } from "@/lib/voice/useRealtimeVoiceSession";
-import { SettingsDialog } from "@/components/settings/SettingsDialog";
-import { IconButton } from "@/components/ui/IconButton";
+import { SettingsDialog } from "@/components/front/settings/SettingsDialog";
+import { IconButton } from "@/components/front/ui/IconButton";
 import { LoginDialog } from "@/components/auth/LoginDialog";
 import { signOut } from "next-auth/react";
 import { useRouter } from "next/navigation";
@@ -389,9 +390,10 @@ export default function ChatClientPage({
       }`}
       style={isDark ? { backgroundImage: labTheme.gradients.canvas } : undefined}
     >
-          <div className="flex h-screen overflow-hidden">
+      <div className="flex h-screen overflow-hidden">
+        {/* Desktop sidebar (md and up) */}
         <aside
-          className={`relative flex-col border-r backdrop-blur-xl transition-[transform] duration-300 ${
+          className={`relative hidden h-full flex-col border-r backdrop-blur-xl md:flex ${
             isDark
               ? sidebarCollapsed
                 ? "border-white/5 bg-neutral-800/80"
@@ -399,18 +401,8 @@ export default function ChatClientPage({
               : sidebarCollapsed
               ? "border-zinc-200/60 bg-white/70"
               : "border-zinc-200/60 bg-zinc-50"
-          } ${
-            showMobileSidebar
-              ? "fixed inset-y-0 left-0 z-40 flex h-full w-[60vw] max-w-sm translate-x-0 shadow-2xl md:relative md:w-auto md:translate-x-0"
-              : "hidden -translate-x-full md:relative md:flex md:h-full md:w-auto md:translate-x-0"
           }`}
-          style={
-            showMobileSidebar
-              ? undefined
-              : {
-                  width: sidebarCollapsed ? 52 : 260,
-                }
-          }
+          style={{ width: sidebarCollapsed ? 52 : 260 }}
         >
           <div className="flex items-center gap-2 px-2 py-2">
             <IconButton
@@ -453,7 +445,7 @@ export default function ChatClientPage({
                 {showMobileSidebar ? (
                   <Tooltip label={t("chat.sidebar.close")}>
                     <span>
-                      <LogOut className="h-5 w-5" />
+                      <X className="h-5 w-5" />
                     </span>
                   </Tooltip>
                 ) : (
@@ -591,6 +583,126 @@ export default function ChatClientPage({
           )}
         </aside>
 
+        {/* Mobile sidebar curtain (below md) */}
+        {showMobileSidebar && (
+          <aside
+            className={`fixed inset-y-0 left-0 z-40 flex h-full w-[60vw] max-w-sm flex-col border-r shadow-2xl backdrop-blur-xl md:hidden ${
+              isDark
+                ? "border-white/5 bg-neutral-800/90"
+                : "border-zinc-200/60 bg-white"
+            }`}
+          >
+            <div className="flex items-center gap-2 px-2 py-2">
+              <IconButton
+                className="group rounded-xl"
+                isDark={isDark}
+                aria-label={t("chat.aria.sidebar.menu")}
+              >
+                <Aperture className="h-5 w-5" />
+              </IconButton>
+              <IconButton
+                className="ml-auto rounded-xl"
+                isDark={isDark}
+                onClick={() => setShowMobileSidebar(false)}
+                aria-label={t("chat.sidebar.close")}
+              >
+                <X className="h-5 w-5" />
+              </IconButton>
+            </div>
+
+            <div className="mt-2 space-y-1 px-2">
+              {["new", "search", "settings"].map((key) => {
+                const icon =
+                  key === "new"
+                    ? MessageSquare
+                    : key === "search"
+                    ? Search
+                    : Settings;
+                const Icon = icon;
+                const label =
+                  key === "new"
+                    ? t("chat.sidebar.newChat")
+                    : key === "search"
+                    ? t("chat.sidebar.search")
+                    : t("chat.sidebar.settings");
+                const shortcut =
+                  key === "new" ? "⇧ ⌘ O" : key === "search" ? "⌘ K" : "";
+                return (
+                  <button
+                    key={key}
+                    className={`group flex w-full items-center rounded-xl px-2 py-2 text-left transition cursor-pointer ${
+                      isDark ? "hover:bg-white/5" : "hover:bg-zinc-100"
+                    }`}
+                    type="button"
+                    onClick={() => {
+                      if (key === "settings") {
+                        setShowSettingsDialog(true);
+                      } else if (key === "new") {
+                        setMessages([]);
+                        setInput("");
+                        setIsNewChatLayout(true);
+                      }
+                      setShowMobileSidebar(false);
+                    }}
+                  >
+                    <div className="flex flex-1 items-center gap-3">
+                      <Icon
+                        className={`h-5 w-5 ${
+                          isDark ? "text-slate-200" : "text-slate-700"
+                        }`}
+                      />
+                      <span
+                        className={`text-sm font-medium ${
+                          isDark ? "text-slate-100" : "text-slate-900"
+                        }`}
+                      >
+                        {label}
+                      </span>
+                    </div>
+                    {key === "new" && (
+                      <span className="ml-auto mr-1 text-xs font-medium text-gray-400">
+                        ⇧ ⌘ O
+                      </span>
+                    )}
+                    {key === "search" && (
+                      <span className="ml-auto mr-1 text-xs font-medium text-gray-400">
+                        ⌘ K
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            {loggedIn && (
+              <div className="mt-auto px-2 py-3">
+                <button
+                  type="button"
+                  onClick={() => setShowUserMenu((prev) => !prev)}
+                  className={`group flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left text-sm transition ${
+                    isDark ? "hover:bg-white/5" : "hover:bg-zinc-100"
+                  }`}
+                >
+                  <User
+                    className={`h-6 w-6 ${
+                      isDark ? "text-slate-200" : "text-slate-700"
+                    }`}
+                  />
+                  <div className="ml-2 flex flex-col">
+                    <span
+                      className={`text-sm font-medium ${
+                        isDark ? "text-slate-100" : "text-slate-900"
+                      }`}
+                    >
+                      {userEmail || t("chat.profile.email")}
+                    </span>
+                  </div>
+                </button>
+              </div>
+            )}
+          </aside>
+        )}
+
         {loggedIn && showUserMenu && (
           <>
             <div
@@ -626,7 +738,7 @@ export default function ChatClientPage({
                   <button
                     type="button"
                     onClick={() => {
-                      router.push("/admin");
+                      router.push("/platform");
                       setShowUserMenu(false);
                     }}
                     className={`mt-3 flex w-full items-center justify-between rounded-2xl px-3 py-2 ${
@@ -755,15 +867,7 @@ export default function ChatClientPage({
           >
             <div className="flex items-center gap-1.5">
               <IconButton
-                onClick={() =>
-                  setShowMobileSidebar((prev) => {
-                    const next = !prev;
-                    if (next) {
-                      setSidebarCollapsedAndPersist(true);
-                    }
-                    return next;
-                  })
-                }
+                onClick={() => setShowMobileSidebar((prev) => !prev)}
                 className={`md:hidden rounded-lg ${
                   isDark ? "text-white" : "text-slate-900"
                 }`}
@@ -939,6 +1043,7 @@ export default function ChatClientPage({
                       <Tooltip
                         placement="above"
                         offset={12}
+                        align="end"
                         label={
                           hasTypedInput
                             ? t("chat.tooltip.send")
@@ -956,7 +1061,7 @@ export default function ChatClientPage({
                               handleStartCall();
                             }
                           }}
-                          className={`absolute right-2 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border text-base font-semibold transition focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed ${
+                          className={`absolute right-2 top-1/2 -mt-1.5 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border text-base font-semibold transition focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed ${
                             hasTypedInput
                               ? isDark
                                 ? "border-white/20 bg-white/10 text-white hover:bg-white/20 cursor-pointer"
@@ -979,7 +1084,7 @@ export default function ChatClientPage({
                 </div>
               )}
 
-              <div className="mx-auto flex max-w-3xl flex-col gap-6">
+              <div className="mx-auto flex max-w-3xl flex-col gap-2">
                 {visibleMessages.map((message, idx) => {
                   const isAssistant = message.from === "assistant";
                   const showActions = isAssistant && !loading;
@@ -1044,17 +1149,53 @@ export default function ChatClientPage({
                     );
                   }
 
+                  if (message.from === "user") {
+                    return (
+                      <div key={message.id} className="group px-1">
+                        <ChatBubble
+                          from={message.from}
+                          meta={message.meta}
+                          variant="chat"
+                          className="rounded-[24px]"
+                        >
+                          {message.text}
+                        </ChatBubble>
+                        <div className="mt-1 flex justify-end gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                          <IconButton
+                            size="sm"
+                            isDark={isDark}
+                            variant="ghost"
+                            className="rounded-lg"
+                            onClick={() => void handleCopy(message.text)}
+                          >
+                            <Tooltip label={t("chat.tooltip.copy")}>
+                              <span>
+                                <Copy className="h-5 w-5" />
+                              </span>
+                            </Tooltip>
+                          </IconButton>
+                          <IconButton
+                            size="sm"
+                            isDark={isDark}
+                            variant="ghost"
+                            className="rounded-lg"
+                            // Ellipsis button is intentionally a no-op for now.
+                            onClick={() => {}}
+                          >
+                            <Ellipsis className="h-5 w-5" />
+                          </IconButton>
+                        </div>
+                      </div>
+                    );
+                  }
+
                   return (
                     <ChatBubble
                       key={message.id}
                       from={message.from}
                       meta={message.meta}
-                      variant="lab"
-                      className={`rounded-[18px] ${
-                        message.from === "user"
-                          ? "rounded-[24px] px-3 py-2 text-lg leading-relaxed"
-                          : ""
-                      }`}
+                      variant="chat"
+                      className="rounded-[18px]"
                     >
                       {message.text}
                     </ChatBubble>
@@ -1168,7 +1309,7 @@ export default function ChatClientPage({
                     }`}
                     aria-label="Close debug panel"
                   >
-                    <LogOut className="h-3 w-3" />
+                    <X className="h-3 w-3" />
                   </button>
 
                   <div
@@ -1378,6 +1519,7 @@ export default function ChatClientPage({
                     <Tooltip
                       placement="above"
                       offset={12}
+                      align="end"
                       label={
                         hasTypedInput
                           ? t("chat.tooltip.send")
@@ -1399,7 +1541,7 @@ export default function ChatClientPage({
                             }
                           }
                         }}
-                        className={`absolute right-2 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border text-base font-semibold transition focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed ${
+                        className={`absolute right-2 top-1/2 -mt-1.5 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border text-base font-semibold transition focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed ${
                           hasTypedInput
                             ? isDark
                               ? "border-white/20 bg-white/10 text-white hover:bg-white/20 cursor-pointer"
@@ -1419,7 +1561,7 @@ export default function ChatClientPage({
                         {hasTypedInput ? (
                           <ArrowUp className="h-5 w-5" />
                         ) : callStatus === "in_call" ? (
-                          <LogOut className="h-5 w-5" />
+                          <X className="h-5 w-5" />
                         ) : (
                           <AudioLines className="h-5 w-5" />
                         )}

@@ -35,7 +35,7 @@ export function IconButton({
   variant = "ghost",
   tone = "default",
   isDark,
-  className,
+  className = "",
   type = "button",
   ...rest
 }: IconButtonProps) {
@@ -48,7 +48,8 @@ export function IconButton({
     tone === "danger"
       ? isDark
         ? {
-            ghost: "border-transparent text-red-300 hover:bg-red-500/10 hover:text-red-200",
+            ghost:
+              "border-transparent text-red-300 hover:bg-red-500/10 hover:text-red-200",
             outline:
               "border-red-500/60 text-red-200 hover:bg-red-500/10 hover:border-red-400",
             solid:
@@ -103,3 +104,4 @@ export function IconButton({
     </button>
   );
 }
+

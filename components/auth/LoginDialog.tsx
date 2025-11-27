@@ -2,7 +2,7 @@
 
 import { useEffect, useState, FormEvent } from "react";
 import { Apple, Mail, Phone, X } from "lucide-react";
-import { Modal } from "@/components/ui/Modal";
+import { Modal } from "@/components/front/ui/Modal";
 import { useTheme } from "@/components/theme/ThemeContext";
 import { useLocale } from "@/components/locale/LocaleContext";
 import { signIn } from "next-auth/react";
