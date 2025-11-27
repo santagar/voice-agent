@@ -14,11 +14,12 @@ import {
   Bug,
   Copy,
   Ellipsis,
-  Grip,
   CircleQuestionMark,
+  Captions,
   HelpCircle,
   LogOut,
   Menu,
+  ArrowDown,
   MessageSquare,
   Mic,
   MicOff,
@@ -35,6 +36,9 @@ import {
   VolumeX,
   Wand2,
   X,
+  MessageCircle,
+  MessageCircleOff,
+  TextCursorInput,
 } from "lucide-react";
 import { ChatBubble } from "@/components/front/ui/ChatBubble";
 import { MarkdownMessage } from "@/components/front/ui/MarkdownMessage";
@@ -90,12 +94,15 @@ export default function ChatClientPage({
     initialScope: "support",
   });
 
-  const [showMobileControls, setShowMobileControls] = useState(true);
+  const [showMobileControls, setShowMobileControls] = useState(false);
+  const [showInputDuringCall, setShowInputDuringCall] = useState(false);
+  const [showAssistantText, setShowAssistantText] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
     initialSidebarCollapsed
   );
   const [showMobileSidebar, setShowMobileSidebar] = useState(false);
   const [showHeaderDivider, setShowHeaderDivider] = useState(false);
+  const [showScrollDown, setShowScrollDown] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [showSettingsDialog, setShowSettingsDialog] = useState(false);
@@ -155,6 +162,22 @@ export default function ChatClientPage({
     }
   };
 
+  // If a voice call is closed without any user/assistant messages,
+  // return to the initial "new chat" hero instead of leaving an
+  // empty conversation layout.
+  const resetToNewChatIfEmpty = useCallback(() => {
+    const hasUserOrAssistant = messages.some(
+      (m) => m.from === "user" || m.from === "assistant"
+    );
+    if (!hasUserOrAssistant) {
+      setMessages([]);
+      setIsNewChatLayout(true);
+    }
+  }, [messages, setMessages]);
+
+  const [callStartedAt, setCallStartedAt] = useState<number | null>(null);
+  const [callElapsedSeconds, setCallElapsedSeconds] = useState(0);
+
   const setSidebarCollapsedAndPersist = useCallback(
     (next: boolean) => {
       setSidebarCollapsed(next);
@@ -196,6 +219,7 @@ export default function ChatClientPage({
   }
 
   function handleStartCall() {
+    setShowInputDuringCall(false);
     setIsNewChatLayout(false);
     startCall();
   }
@@ -217,6 +241,38 @@ export default function ChatClientPage({
     () => messages.filter((m) => m.from === "system"),
     [messages]
   );
+
+  const callActive =
+    callStatus === "calling" || callStatus === "in_call";
+  const shouldShowInput = !callActive || showInputDuringCall;
+
+  // Track call duration for active voice sessions.
+  useEffect(() => {
+    if (callActive && !callStartedAt) {
+      setCallStartedAt(Date.now());
+    }
+    if (!callActive) {
+      setCallStartedAt(null);
+      setCallElapsedSeconds(0);
+    }
+  }, [callActive, callStartedAt]);
+
+  useEffect(() => {
+    if (!callStartedAt || !callActive) return;
+    const id = window.setInterval(() => {
+      setCallElapsedSeconds(Math.floor((Date.now() - callStartedAt) / 1000));
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [callStartedAt, callActive]);
+
+  const callTimerLabel = useMemo(() => {
+    const total = callElapsedSeconds;
+    const minutes = Math.floor(total / 60)
+      .toString()
+      .padStart(2, "0");
+    const seconds = (total % 60).toString().padStart(2, "0");
+    return `${minutes}:${seconds}`;
+  }, [callElapsedSeconds]);
 
   useEffect(() => {
     debugOffsetRef.current = debugOffset;
@@ -337,7 +393,13 @@ export default function ChatClientPage({
     if (!chatEl) return;
     const updateHeaderDivider = () => {
       const canScroll = chatEl.scrollHeight > chatEl.clientHeight;
-      setShowHeaderDivider(canScroll && chatEl.scrollTop > 0);
+      const scrollTop = chatEl.scrollTop;
+      const nearTop = scrollTop <= 0;
+      const nearBottom =
+        chatEl.scrollHeight - (scrollTop + chatEl.clientHeight) < 8;
+
+      setShowHeaderDivider(canScroll && !nearTop);
+      setShowScrollDown(canScroll && !nearBottom);
     };
     updateHeaderDivider();
     chatEl.addEventListener("scroll", updateHeaderDivider);
@@ -855,15 +917,11 @@ export default function ChatClientPage({
             aria-hidden
           />
         )}
-        <div
-          className={`flex flex-1 flex-col min-w-0 backdrop-blur-xl ${
-            isDark ? "bg-neutral-800/80" : "bg-white/70"
-          }`}
-        >
+        <div className="flex flex-1 flex-col min-w-0 backdrop-blur-xl">
           <header
-            className={`sticky top-0 z-20 flex flex-wrap items-center justify-between gap-2 border-b bg-transparent px-2 py-2 transition-colors ${
+            className={`sticky top-0 z-20 flex flex-wrap items-center justify-between gap-2 border-b bg-transparent px-2 py-2 transition-colors md:flex ${
               showHeaderDivider ? "border-white/10" : "border-transparent"
-            } relative`}
+            } ${callStatus === "in_call" || callStatus === "calling" ? "hidden" : "flex"} relative`}
           >
             <div className="flex items-center gap-1.5">
               <IconButton
@@ -935,32 +993,26 @@ export default function ChatClientPage({
                   <CircleQuestionMark className="h-5 w-5" />
                 </button>
               )}
-              <IconButton
-                size="sm"
-                variant="outline"
-                isDark={isDark}
-                className={`sm:hidden rounded-xl ${
-                  showMobileControls
-                    ? ""
-                    : isDark
-                    ? "text-white/50"
-                    : "text-slate-700"
-                }`}
-                onClick={() => setShowMobileControls((prev) => !prev)}
-                aria-label={
-                  showMobileControls
-                    ? t("chat.aria.mobileControls.hide")
-                    : t("chat.aria.mobileControls.show")
-                }
-              >
-                <Grip
-                  className={`h-4 w-4 ${
-                    showMobileControls ? "opacity-100" : "opacity-60"
-                  }`}
-                />
-              </IconButton>
             </div>
           </header>
+
+          {callActive && (
+            <>
+              {/* Mobile: overlay timer over content */}
+              <div className="pointer-events-none fixed inset-x-0 top-2 z-30 flex justify-center md:hidden">
+                <div
+                  className={`pointer-events-auto inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-medium tracking-[0.16em] ${
+                    isDark
+                      ? "bg-white/10 text-gray-100"
+                      : "bg-zinc-900 text-zinc-100"
+                  }`}
+                >
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  <span className="font-mono text-xs">{callTimerLabel}</span>
+                </div>
+              </div>
+            </>
+          )}
 
           {loggedIn && showMenu && (
             <>
@@ -998,10 +1050,24 @@ export default function ChatClientPage({
             </>
           )}
 
-          <div className="flex flex-1 flex-col min-h-0 px-4 pb-6 sm:px-6 md:px-10">
+          <div className="flex flex-1 flex-col min-h-0 px-4 pb-6 sm:px-6 md:px-10 relative">
+            {callActive && (
+              <div className="pointer-events-none hidden md:flex absolute inset-x-0 top-2 z-20 justify-center">
+                <div
+                  className={`pointer-events-auto inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-medium tracking-[0.16em] ${
+                    isDark
+                      ? "bg-white/10 text-gray-100"
+                      : "bg-zinc-900 text-zinc-100"
+                  }`}
+                >
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  <span className="font-mono text-xs">{callTimerLabel}</span>
+                </div>
+              </div>
+            )}
             <div
               ref={chatRef}
-              className="flex-1 overflow-y-auto pt-6 pb-4 pr-1"
+              className="relative flex-1 overflow-y-auto pt-6 pb-4 pr-1"
             >
               {isNewChatLayout && visibleMessages.length === 0 && (
                 <div className="mx-auto flex w-full max-w-3xl flex-col items-center justify-center px-1 pt-48 pb-16 text-center">
@@ -1019,76 +1085,84 @@ export default function ChatClientPage({
                   >
                     {t("chat.hero.subtitle")}
                   </p>
-                  <div className="mt-6 w-full max-w-3xl">
-                    <div className="relative">
-                      <input
-                        type="text"
-                        ref={inputRef}
+                  {shouldShowInput && (
+                    <div className="mt-6 w-full max-w-3xl">
+                      <div className="relative">
+                        <input
+                          type="text"
+                          ref={inputRef}
                         className={`h-14 w-full rounded-full border pl-5 pr-16 text-base placeholder:text-neutral-400 focus:outline-none ${
                           isDark
-                            ? "border-white/10 bg-white/10 text-slate-100"
-                            : "border-zinc-300 bg-white text-slate-900"
+                            ? "border-white/10 bg-white/5 text-slate-100"
+                            : "border-zinc-300 bg-white/80 text-slate-900"
                         }`}
-                        placeholder={t("chat.input.placeholderIdle")}
-                        value={input}
-                        onChange={(e) => setInput(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            handleSendText();
-                          }
-                        }}
-                        disabled={!wsConnected}
-                      />
-                      <Tooltip
-                        placement="above"
-                        offset={12}
-                        align="end"
-                        label={
-                          hasTypedInput
-                            ? t("chat.tooltip.send")
-                            : t("chat.tooltip.startVoiceCall")
-                        }
-                      >
-                        <button
-                          onClick={() => {
-                            if (hasTypedInput) {
+                          placeholder={t("chat.input.placeholderIdle")}
+                          value={input}
+                          onChange={(e) => setInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
                               handleSendText();
-                            } else if (
-                              callStatus !== "calling" &&
-                              callStatus !== "in_call"
-                            ) {
-                              handleStartCall();
                             }
                           }}
-                          className={`absolute right-2 top-1/2 -mt-1.5 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border text-base font-semibold transition focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed ${
+                          disabled={!wsConnected}
+                        />
+                        <Tooltip
+                          placement="above"
+                          offset={12}
+                          align="end"
+                          label={
                             hasTypedInput
-                              ? isDark
-                                ? "border-white/20 bg-white/10 text-white hover:bg-white/20 cursor-pointer"
-                                : "border-zinc-300 bg-zinc-100 text-slate-900 hover:border-zinc-400 hover:bg-zinc-200 cursor-pointer"
-                              : isDark
-                              ? "border-white/30 bg-white/15 text-white/80 hover:border-white/40 hover:bg-white/25 hover:text-white cursor-pointer"
-                              : "border-zinc-300 bg-zinc-100 text-slate-800 hover:border-zinc-400 hover:bg-zinc-200 cursor-pointer"
-                          }`}
-                          disabled={!wsConnected || callStatus === "calling"}
+                              ? t("chat.tooltip.send")
+                              : t("chat.tooltip.startVoiceCall")
+                          }
                         >
-                          {hasTypedInput ? (
-                            <ArrowUp className="h-5 w-5" />
-                          ) : (
-                            <AudioLines className="h-5 w-5" />
-                          )}
-                        </button>
-                      </Tooltip>
+                          <button
+                            onClick={() => {
+                              if (hasTypedInput) {
+                                handleSendText();
+                              } else if (
+                                callStatus !== "calling" &&
+                                callStatus !== "in_call"
+                              ) {
+                                handleStartCall();
+                                setShowMobileControls(true);
+                              }
+                            }}
+                            className={`absolute right-2 top-1/2 -mt-1.5 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border text-base font-semibold transition focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed ${
+                              hasTypedInput
+                                ? isDark
+                                  ? "border-white/20 bg-white/10 text-white hover:bg-white/20 cursor-pointer"
+                                  : "border-zinc-300 bg-zinc-100 text-slate-900 hover:border-zinc-400 hover:bg-zinc-200 cursor-pointer"
+                                : isDark
+                                ? "border-white/30 bg-white/15 text-white/80 hover:border-white/40 hover:bg-white/25 hover:text-white cursor-pointer"
+                                : "border-zinc-300 bg-zinc-100 text-slate-800 hover:border-zinc-400 hover:bg-zinc-200 cursor-pointer"
+                            }`}
+                            disabled={!wsConnected || callStatus === "calling"}
+                          >
+                            {hasTypedInput ? (
+                              <ArrowUp className="h-5 w-5" />
+                            ) : (
+                              <AudioLines className="h-5 w-5" />
+                            )}
+                          </button>
+                        </Tooltip>
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               )}
 
               <div className="mx-auto flex max-w-3xl flex-col gap-2">
                 {visibleMessages.map((message, idx) => {
                   const isAssistant = message.from === "assistant";
+                  const isUser = message.from === "user";
                   const showActions = isAssistant && !loading;
                   const isLast = idx === messages.length - 1;
+                  // When subtitles are disabled, hide both assistant and user text.
+                  if (!showAssistantText && (isAssistant || isUser)) {
+                    return null;
+                  }
                   // For assistant messages, render markdown content with actions.
                   if (isAssistant) {
                     return (
@@ -1135,7 +1209,7 @@ export default function ChatClientPage({
                   // pending user utterance placeholder ("…"), render a
                   // breathing dot aligned to the user side instead of text.
                   const isPendingUserUtterance =
-                    message.from === "user" && message.text === "…";
+                    isUser && message.text === "…";
 
                   if (isPendingUserUtterance) {
                     return (
@@ -1205,6 +1279,26 @@ export default function ChatClientPage({
                   <div className="flex items-center gap-2 text-xs text-slate-400">
                     <span className="status-dot dot-online" />
                     {t("chat.status.thinking")}
+                  </div>
+                )}
+
+                {showScrollDown && (
+                  <div className="pointer-events-none sticky bottom-0 z-20 flex justify-center">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        scrollToBottom();
+                        setShowScrollDown(false);
+                      }}
+                      className={`pointer-events-auto flex h-9 w-9 items-center justify-center rounded-full border text-xs shadow-sm transition ${
+                        isDark
+                          ? "border-white/15 bg-neutral-900/85 text-white hover:bg-neutral-800"
+                          : "border-zinc-200 bg-white/95 text-slate-900 hover:bg-zinc-100"
+                      }`}
+                      aria-label={t("chat.aria.scrollToBottom")}
+                    >
+                      <ArrowDown className="h-4 w-4" />
+                    </button>
                   </div>
                 )}
               </div>
@@ -1481,14 +1575,14 @@ export default function ChatClientPage({
                     }`}
                     aria-label={t("chat.debug.resize")}
                   >
-                    <Grip className="h-3 w-3" />
+                    <span className="inline-block h-2 w-2 rounded-sm border border-current" />
                   </button>
                 </div>
               </div>
             )}
 
-            {!isNewChatLayout && (
-              <div className="mx-auto w-full max-w-3xl px-1 sm:px-1">
+            {!isNewChatLayout && shouldShowInput && (
+              <div className="mx-auto w-full max-w-3xl px-1 sm:px-1 pb-6">
                 <div className="flex items-center gap-3">
                   <div className="relative flex-1">
                     <input
@@ -1496,8 +1590,8 @@ export default function ChatClientPage({
                       ref={inputRef}
                       className={`h-14 w-full rounded-full border pl-5 pr-16 text-base placeholder:text-neutral-400 focus:outline-none ${
                         isDark
-                          ? "border-white/10 bg-white/10 text-slate-100"
-                          : "border-zinc-300 bg-white text-slate-900"
+                          ? "border-white/10 bg-white/5 text-slate-100"
+                          : "border-zinc-300 bg-white/80 text-slate-900"
                       }`}
                       placeholder={
                         callStatus === "in_call"
@@ -1530,16 +1624,18 @@ export default function ChatClientPage({
                     >
                       <button
                         onClick={() => {
-                          if (hasTypedInput) {
-                            handleSendText();
-                          } else {
-                            if (callStatus === "calling") return;
-                            if (callStatus === "in_call") {
-                              endCall();
+                            if (hasTypedInput) {
+                              handleSendText();
                             } else {
-                              handleStartCall();
+                              if (callStatus === "calling") return;
+                              if (callStatus === "in_call") {
+                                endCall();
+                                setShowMobileControls(false);
+                              } else {
+                                handleStartCall();
+                                setShowMobileControls(true);
+                              }
                             }
-                          }
                         }}
                         className={`absolute right-2 top-1/2 -mt-1.5 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border text-base font-semibold transition focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed ${
                           hasTypedInput
@@ -1573,16 +1669,44 @@ export default function ChatClientPage({
             )}
 
             {showMobileControls && (
-              <div className="sm:hidden">
-                <div className="mx-auto mt-4 flex w-full max-w-md items-center justify-center gap-4 px-2">
+              <div className="mt-4">
+                <div className="mx-auto flex w-full max-w-md items-center justify-center gap-4 px-2">
+                  <button
+                    onClick={() =>
+                      setShowAssistantText((prev) => !prev)
+                    }
+                    className={`flex h-10 w-10 items-center justify-center rounded-full border transition ${
+                      !showAssistantText
+                        ? "border-transparent bg-rose-100 text-rose-700"
+                        : isDark
+                        ? "border-white/20 bg-neutral-800 text-white"
+                        : "border-zinc-300 bg-zinc-800 text-white"
+                    }`}
+                  >
+                    <Tooltip
+                      label={
+                        showAssistantText
+                          ? t("chat.tooltip.hideChatText")
+                          : t("chat.tooltip.showChatText")
+                      }
+                    >
+                      <span>
+                        {showAssistantText ? (
+                          <MessageCircle className="h-4 w-4" />
+                        ) : (
+                          <MessageCircleOff className="h-4 w-4" />
+                        )}
+                      </span>
+                    </Tooltip>
+                  </button>
                   <button
                     onClick={toggleSpeaker}
-                    className={`flex h-12 w-12 items-center justify-center rounded-full border text-white transition ${
+                    className={`flex h-12 w-12 items-center justify-center rounded-full border transition ${
                       muted
-                        ? "border-amber-500 bg-amber-500 text-slate-900"
+                        ? "border-transparent bg-rose-100 text-rose-700"
                         : isDark
-                        ? "border-white/20 bg-neutral-800"
-                        : "border-zinc-300 bg-zinc-800"
+                        ? "border-white/20 bg-neutral-800 text-white"
+                        : "border-zinc-300 bg-zinc-800 text-white"
                     }`}
                   >
                     <Tooltip
@@ -1594,9 +1718,15 @@ export default function ChatClientPage({
                     >
                       <span>
                         {muted ? (
-                          <VolumeX strokeWidth={1.8} className="h-5 w-5" />
+                          <VolumeX
+                            strokeWidth={1.8}
+                            className="h-5 w-5 text-rose-700"
+                          />
                         ) : (
-                          <Volume2 strokeWidth={1.8} className="h-5 w-5" />
+                          <Volume2
+                            strokeWidth={1.8}
+                            className="h-5 w-5 text-white"
+                          />
                         )}
                       </span>
                     </Tooltip>
@@ -1605,8 +1735,12 @@ export default function ChatClientPage({
                     onClick={() => {
                       if (callStatus === "in_call") {
                         endCall();
+                        setShowMobileControls(false);
+                        setShowInputDuringCall(false);
+                        resetToNewChatIfEmpty();
                       } else if (callStatus !== "calling") {
                         handleStartCall();
+                        setShowMobileControls(true);
                       }
                     }}
                     className={`flex h-16 w-16 items-center justify-center rounded-full border text-white transition active:scale-95 ${
@@ -1625,22 +1759,22 @@ export default function ChatClientPage({
                       }
                     >
                       <span>
-                        <Phone
-                          className={`h-7 w-7 ${
-                            callStatus === "in_call" ? "rotate-135" : ""
-                          }`}
-                        />
+                        {callStatus === "in_call" ? (
+                          <X className="h-8 w-8" />
+                        ) : (
+                          <AudioLines className="h-7 w-7" />
+                        )}
                       </span>
                     </Tooltip>
                   </button>
                   <button
                     onClick={toggleMic}
-                    className={`flex h-12 w-12 items-center justify-center rounded-full border text-white transition ${
+                    className={`flex h-12 w-12 items-center justify-center rounded-full border transition ${
                       micMuted
-                        ? "border-rose-500 bg-rose-500 text-white"
+                        ? "border-transparent bg-rose-100 text-rose-700"
                         : isDark
-                        ? "border-white/20 bg-neutral-800"
-                        : "border-zinc-300 bg-zinc-800"
+                        ? "border-white/20 bg-neutral-800 text-white"
+                        : "border-zinc-300 bg-zinc-800 text-white"
                     }`}
                   >
                     <Tooltip
@@ -1652,10 +1786,40 @@ export default function ChatClientPage({
                     >
                       <span>
                         {micMuted ? (
-                          <MicOff strokeWidth={1.8} className="h-5 w-5" />
+                          <MicOff
+                            strokeWidth={1.8}
+                            className="h-5 w-5 text-rose-700"
+                          />
                         ) : (
-                          <Mic strokeWidth={1.8} className="h-5 w-5" />
+                          <Mic
+                            strokeWidth={1.8}
+                            className="h-5 w-5 text-white"
+                          />
                         )}
+                      </span>
+                    </Tooltip>
+                  </button>
+                  <button
+                    onClick={() =>
+                      setShowInputDuringCall((prev) => !prev)
+                    }
+                    className={`flex h-10 w-10 items-center justify-center rounded-full border transition ${
+                      !showInputDuringCall
+                        ? "border-transparent bg-rose-100 text-rose-700"
+                        : isDark
+                        ? "border-white/20 bg-neutral-800 text-white"
+                        : "border-zinc-300 bg-zinc-800 text-white"
+                    }`}
+                  >
+                    <Tooltip
+                      label={
+                        showInputDuringCall
+                          ? t("chat.tooltip.hideTextInput")
+                          : t("chat.tooltip.showTextInput")
+                      }
+                    >
+                      <span>
+                        <TextCursorInput className="h-4 w-4" />
                       </span>
                     </Tooltip>
                   </button>

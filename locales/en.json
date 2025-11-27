@@ -48,7 +48,11 @@
   "chat.tooltip.unmuteSpeaker": "Unmute speaker",
   "chat.tooltip.muteMic": "Mute microphone",
   "chat.tooltip.unmuteMic": "Unmute microphone",
-
+  "chat.tooltip.showTextInput": "Show text input",
+  "chat.tooltip.hideTextInput": "Hide text input",
+  "chat.tooltip.showChatText": "Show chat text",
+  "chat.tooltip.hideChatText": "Hide chat text",
+  "chat.aria.scrollToBottom": "Scroll to latest messages",
   "chat.login.open": "Log in",
   "chat.login.close": "Close login",
   "chat.login.title": "Log in or sign up",

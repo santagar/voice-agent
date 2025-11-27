@@ -48,7 +48,11 @@
   "chat.tooltip.unmuteSpeaker": "Activar altavoz",
   "chat.tooltip.muteMic": "Silenciar micro",
   "chat.tooltip.unmuteMic": "Activar micro",
-
+  "chat.tooltip.showTextInput": "Mostrar campo de texto",
+  "chat.tooltip.hideTextInput": "Ocultar campo de texto",
+  "chat.tooltip.showChatText": "Mostrar texto del chat",
+  "chat.tooltip.hideChatText": "Ocultar texto del chat",
+  "chat.aria.scrollToBottom": "Ir al último mensaje",
   "chat.login.open": "Iniciar sesión",
   "chat.login.close": "Cerrar inicio de sesión",
   "chat.login.title": "Inicia sesión o regístrate",
