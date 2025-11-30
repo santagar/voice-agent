@@ -8,9 +8,9 @@ import React, {
   useState,
 } from "react";
 import {
-  Aperture,
   ArrowUp,
   AudioLines,
+  Archive,
   Bug,
   Copy,
   Ellipsis,
@@ -20,13 +20,11 @@ import {
   LogOut,
   Menu,
   ArrowDown,
-  MessageSquare,
   Mic,
   MicOff,
   Moon,
-  PanelLeft,
   Phone,
-  Search,
+  PanelLeft,
   Settings,
   Sun,
   User,
@@ -39,6 +37,7 @@ import {
   MessageCircle,
   MessageCircleOff,
   TextCursorInput,
+  Trash2,
 } from "lucide-react";
 import { ChatBubble } from "@/components/front/ui/ChatBubble";
 import { MarkdownMessage } from "@/components/front/ui/MarkdownMessage";
@@ -54,7 +53,15 @@ import { SettingsDialog } from "@/components/front/settings/SettingsDialog";
 import { IconButton } from "@/components/front/ui/IconButton";
 import { LoginDialog } from "@/components/auth/LoginDialog";
 import { signOut } from "next-auth/react";
+import { ChatTextInput } from "@/components/front/chat/ChatTextInput";
 import { useRouter } from "next/navigation";
+import {
+  Sidebar,
+  ChatSummary,
+  ChatSummaryMode,
+} from "./components/Sidebar";
+import { ChatHeader, AssistantSummary } from "./components/Header";
+import { ConfirmDialog } from "@/components/front/ui/ConfirmDialog";
 
 const START_CALL_PROMPT =
   "Arranca una conversación de voz amable y breve en español. Presentate y pregunta en qué puedes ayudar.";
@@ -63,12 +70,28 @@ type ChatClientProps = {
   initialSidebarCollapsed: boolean;
   initialLoggedIn?: boolean;
   initialUserEmail?: string | null;
+  initialChatId?: string | null;
+  initialUserName?: string | null;
+  initialUserImage?: string | null;
+  currentUserId?: string | null;
+  workspaceId?: string | null;
+  assistantId?: string | null;
+  initialChats?: ChatSummary[] | null;
+  initialAssistants?: AssistantSummary[] | null;
 };
 
 export default function ChatClientPage({
   initialSidebarCollapsed,
   initialLoggedIn = false,
   initialUserEmail = null,
+  initialChatId = null,
+  initialUserName = null,
+  initialUserImage = null,
+  currentUserId = null,
+  workspaceId = null,
+  assistantId = null,
+  initialChats = null,
+  initialAssistants = null,
 }: ChatClientProps) {
   const {
     messages,
@@ -92,6 +115,85 @@ export default function ChatClientPage({
   } = useRealtimeVoiceSession({
     startCallPrompt: START_CALL_PROMPT,
     initialScope: "support",
+    onAssistantTurnFinal: (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed) return;
+
+      let conversationId = activeConversationId;
+
+      // If for some reason we don't yet have a conversation (e.g. pure
+      // voice greeting), create one now so the assistant turn is not
+      // lost.
+      if (!conversationId && activeAssistantId && workspaceId) {
+        void (async () => {
+          try {
+            const mode =
+              callStatus === "in_call" || callStatus === "calling"
+                ? "voice"
+                : "text";
+            const res = await fetch("/api/conversations", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                title: "New chat",
+                mode,
+                userId: currentUserId,
+                assistantId: activeAssistantId,
+                workspaceId,
+              }),
+            });
+            if (!res.ok) return;
+            const data = await res.json();
+            const conv = data.conversation;
+            if (conv?.id) {
+              const id = conv.id as string;
+              setActiveConversationId(id);
+              setChats((prev) => [
+                {
+                  id,
+                  title: conv.title as string,
+                  mode: (conv.mode as ChatSummaryMode) ?? "unknown",
+                  createdAt: conv.createdAt as string,
+                  updatedAt: conv.updatedAt as string,
+                  lastMessageFrom: null,
+                  lastMessageAt: null,
+                },
+                ...prev,
+              ]);
+              conversationId = id;
+            }
+          } catch (err) {
+            console.error("Failed to create conversation for assistant:", err);
+          }
+        })();
+      }
+
+      if (!conversationId) return;
+
+      void fetch(`/api/conversations/${conversationId}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          from: "assistant",
+          text: trimmed,
+          meta: {
+            turnType:
+              callStatus === "in_call" || callStatus === "calling"
+                ? "assistant_voice"
+                : "assistant_text",
+            scope: currentScope,
+            inputMode: null,
+            outputMode:
+              callStatus === "in_call" || callStatus === "calling"
+                ? "voice"
+                : "text",
+            bargeIn: false,
+          },
+        }),
+      }).catch((err) => {
+        console.error("Failed to persist assistant message:", err);
+      });
+    },
   });
 
   const [showMobileControls, setShowMobileControls] = useState(false);
@@ -144,16 +246,48 @@ export default function ChatClientPage({
   const [loggedIn, setLoggedIn] = useState(initialLoggedIn);
   const [showLoginDialog, setShowLoginDialog] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(initialUserEmail);
+  const [userName, setUserName] = useState<string | null>(initialUserName);
+  const [userImage, setUserImage] = useState<string | null>(initialUserImage);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [chats, setChats] = useState<ChatSummary[]>(initialChats ?? []);
+  const [activeChatId, setActiveChatId] = useState<string | null>(null);
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const router = useRouter();
   const isAdminUser = userEmail === "santagar@gmail.com";
   const [isNewChatLayout, setIsNewChatLayout] = useState(true);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [toast, setToast] = useState<{
+    message: string;
+    tone: "error" | "info";
+  } | null>(null);
   const { theme, toggleTheme } = useTheme();
   const isDark = theme === "dark";
   const { locale, setLocale, t } = useLocale();
   const chatRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const lastMessageIdRef = useRef<string | null>(null);
+  // Used to avoid re-persisting the same assistant snapshot multiple times.
+  const persistedMessageIdsRef = useRef<Set<string>>(new Set());
+  const hydratedFromServerRef = useRef(false);
+  const [conversationHydrated, setConversationHydrated] = useState(
+    !initialChatId
+  );
+  const [conversationLoadError, setConversationLoadError] = useState<
+    string | null
+  >(null);
   const hasTypedInput = input.trim().length > 0;
+  const initialAssistantList: AssistantSummary[] =
+    initialAssistants && initialAssistants.length
+      ? initialAssistants
+      : assistantId
+      ? [{ id: assistantId, name: "Voice Agent" }]
+      : [];
+  const [assistants] = useState<AssistantSummary[]>(initialAssistantList);
+  const [activeAssistantId, setActiveAssistantId] = useState<string | null>(
+    assistantId && initialAssistantList.some((a) => a.id === assistantId)
+      ? assistantId
+      : initialAssistantList[0]?.id ?? null
+  );
   const handleCopy = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
@@ -172,6 +306,7 @@ export default function ChatClientPage({
     if (!hasUserOrAssistant) {
       setMessages([]);
       setIsNewChatLayout(true);
+      setActiveChatId(null);
     }
   }, [messages, setMessages]);
 
@@ -201,7 +336,11 @@ export default function ChatClientPage({
       return;
     }
     const prompt = `Repite exactamente este mensaje en voz usando tu propia voz, sin añadir nada más:\n\n${trimmed}`;
-    void sendUserMessage(prompt, { silent: true });
+    void sendUserMessage(prompt, {
+      silent: true,
+      conversationId: activeConversationId,
+      assistantId: activeAssistantId ?? undefined,
+    });
   }
 
   function scrollToBottom() {
@@ -224,12 +363,86 @@ export default function ChatClientPage({
     startCall();
   }
 
-  function handleSendText() {
+  async function handleSendText() {
     const trimmed = input.trim();
     if (!trimmed) return;
     setIsNewChatLayout(false);
-    void sendUserMessage(trimmed);
+
+    let conversationId = activeConversationId;
+
+    // For text-only flows, ensure we have a Conversation as soon as the
+    // user sends the first message.
+    if (!conversationId && activeAssistantId && workspaceId) {
+      try {
+        const mode =
+          callStatus === "in_call" || callStatus === "calling"
+            ? "voice"
+            : "text";
+        const res = await fetch("/api/conversations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: "New chat",
+            mode,
+            userId: currentUserId,
+            assistantId: activeAssistantId,
+            workspaceId,
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const conv = data.conversation;
+          if (conv?.id) {
+            conversationId = conv.id as string;
+            setActiveConversationId(conversationId);
+            setChats((prev) => [
+              {
+                id: conv.id as string,
+                title: conv.title as string,
+                mode: (conv.mode as ChatSummaryMode) ?? "unknown",
+                createdAt: conv.createdAt as string,
+                updatedAt: conv.updatedAt as string,
+                lastMessageFrom: null,
+                lastMessageAt: null,
+              },
+              ...prev,
+            ]);
+          }
+        }
+      } catch (err) {
+        console.error("Failed to create conversation:", err);
+      }
+    }
+
     setInput("");
+    void sendUserMessage(trimmed, {
+      conversationId,
+      assistantId: activeAssistantId ?? undefined,
+    });
+
+    // Persist the user's message immediately if we have a conversation id.
+    if (conversationId) {
+      void fetch(`/api/conversations/${conversationId}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          from: "user",
+          text: trimmed,
+          meta: {
+            turnType: "user_text",
+            scope: currentScope,
+            inputMode: "keyboard",
+            outputMode:
+              callStatus === "in_call" || callStatus === "calling"
+                ? "voice"
+                : "text",
+            bargeIn: false,
+          },
+        }),
+      }).catch((err) => {
+        console.error("Failed to persist user message:", err);
+      });
+    }
   }
 
   const visibleMessages = useMemo(
@@ -245,6 +458,203 @@ export default function ChatClientPage({
   const callActive =
     callStatus === "calling" || callStatus === "in_call";
   const shouldShowInput = !callActive || showInputDuringCall;
+
+  // Ensure a Conversation exists once there is a first real message
+  // (user or assistant) in the current session.
+  useEffect(() => {
+    if (activeConversationId) return;
+    if (!activeAssistantId || !workspaceId) return;
+
+    const userOrAssistantMessages = visibleMessages.filter(
+      (m) => (m.from === "user" || m.from === "assistant") && m.text.trim()
+    );
+    if (userOrAssistantMessages.length === 0) return;
+
+    const mode =
+      callStatus === "in_call" || callStatus === "calling" ? "voice" : "text";
+
+    void (async () => {
+      try {
+        const res = await fetch("/api/conversations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: "New chat",
+            mode,
+            userId: currentUserId,
+            assistantId: activeAssistantId,
+            workspaceId,
+          }),
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        const conv = data.conversation;
+        if (conv?.id) {
+          setActiveConversationId(conv.id as string);
+          setChats((prev) => [
+            {
+              id: conv.id as string,
+              title: conv.title as string,
+              mode: (conv.mode as ChatSummaryMode) ?? "unknown",
+              createdAt: conv.createdAt as string,
+              updatedAt: conv.updatedAt as string,
+              lastMessageFrom: null,
+              lastMessageAt: null,
+            },
+            ...prev,
+          ]);
+        }
+      } catch (err) {
+        console.error("Failed to create conversation:", err);
+      }
+    })();
+  }, [
+    activeConversationId,
+    assistantId,
+    callStatus,
+    currentUserId,
+    visibleMessages,
+    workspaceId,
+  ]);
+
+  // Load chat summaries from the backend on first mount.
+  useEffect(() => {
+    let cancelled = false;
+    async function loadChats() {
+      try {
+        const res = await fetch("/api/conversations");
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!Array.isArray(data.conversations)) return;
+        if (cancelled) return;
+        const summaries: ChatSummary[] = data.conversations.map((c: any) => ({
+          id: c.id,
+          title: c.title,
+          mode: c.mode ?? "unknown",
+          createdAt: c.createdAt,
+          updatedAt: c.updatedAt,
+          lastMessageFrom: null,
+          lastMessageAt: c.lastMessageAt,
+        }));
+        setChats(summaries);
+      } catch (err) {
+        console.error("Failed to load chats:", err);
+      }
+    }
+    void loadChats();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // When arriving on /c/[chatId], hydrate the message list from
+  // the backend conversation history so the user sees previous
+  // turns instead of an empty state.
+  useEffect(() => {
+    if (!initialChatId) return;
+    if (hydratedFromServerRef.current) return;
+
+    let cancelled = false;
+
+    async function loadConversation() {
+      try {
+        setConversationLoadError(null);
+
+        const controller = new AbortController();
+        const timeoutId = window.setTimeout(() => {
+          controller.abort();
+        }, 10000);
+
+        const res = await fetch(`/api/conversations/${initialChatId}`, {
+          signal: controller.signal,
+        }).finally(() => {
+          window.clearTimeout(timeoutId);
+        });
+
+        if (!res.ok) {
+          if (!cancelled) {
+            if (res.status === 404) {
+              setConversationLoadError("not_found");
+              try {
+                const template = t("chat.toast.unableToLoadConversation");
+                const id = initialChatId ?? "";
+                const msg = template.replace("{id}", id);
+                window.sessionStorage.setItem("va-toast", msg);
+              } catch {
+                // ignore storage errors
+              }
+              setConversationHydrated(true);
+              router.push("/");
+            } else {
+              setConversationLoadError("error");
+              setConversationHydrated(true);
+            }
+          }
+          return;
+        }
+
+        const data = await res.json();
+        if (!Array.isArray(data.messages)) {
+          if (!cancelled) {
+            setConversationLoadError("error");
+            setConversationHydrated(true);
+          }
+          return;
+        }
+        if (cancelled) return;
+
+        const nextMessages: VoiceMessage[] = data.messages.map(
+          (m: any): VoiceMessage => ({
+            id: m.id as string,
+            from:
+              m.from === "assistant"
+                ? "assistant"
+                : m.from === "system"
+                ? "system"
+                : "user",
+            text: typeof m.text === "string" ? m.text : "",
+          })
+        );
+
+        setMessages(nextMessages);
+        setActiveConversationId(initialChatId);
+        setActiveChatId(initialChatId);
+        setIsNewChatLayout(false);
+        hydratedFromServerRef.current = true;
+        setConversationHydrated(true);
+      } catch (err) {
+        console.error("Failed to hydrate conversation from server:", err);
+        if (!cancelled) {
+          setConversationLoadError("timeout");
+          setConversationHydrated(true);
+        }
+      }
+    }
+
+    void loadConversation();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [initialChatId, setMessages, router, t]);
+
+  // Helper to derive a simple human-readable title from the first
+  // meaningful message in a conversation.
+  const deriveTitleFromText = useCallback(
+    (text: string): string => {
+      const trimmed = text.trim().replace(/\s+/g, " ");
+      if (!trimmed) return t("chat.sidebar.newChat");
+      const maxLen = 60;
+      if (trimmed.length <= maxLen) return trimmed;
+      return trimmed.slice(0, maxLen).trimEnd() + "…";
+    },
+    [t]
+  );
+
+  // NOTE: For now we only persist user messages from the client.
+  // Assistant messages are streamed token-by-token, so capturing a
+  // single, stable snapshot is better done from the Realtime bridge
+  // once the final transcript is known.
 
   // Track call duration for active voice sessions.
   useEffect(() => {
@@ -273,6 +683,96 @@ export default function ChatClientPage({
     const seconds = (total % 60).toString().padStart(2, "0");
     return `${minutes}:${seconds}`;
   }, [callElapsedSeconds]);
+
+  const handleArchiveConversation = useCallback(async () => {
+    if (!activeConversationId) return;
+    try {
+      const res = await fetch(`/api/conversations/${activeConversationId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "archive" }),
+      });
+      if (!res.ok) return;
+      // We don't yet surface archived state in the UI; this is a
+      // lightweight server-side toggle so future listings can hide it.
+    } catch (err) {
+      console.error("Failed to archive conversation:", err);
+    } finally {
+      setShowMenu(false);
+    }
+  }, [activeConversationId]);
+
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+
+  const handleDeleteConversation = useCallback(async () => {
+    if (!pendingDeleteId) return;
+    try {
+      const res = await fetch(`/api/conversations/${pendingDeleteId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok && res.status !== 204) return;
+      setChats((prev) =>
+        prev.filter((chat) => chat.id !== pendingDeleteId)
+      );
+      if (pendingDeleteId === activeConversationId) {
+        setMessages([]);
+        setActiveChatId(null);
+        setActiveConversationId(null);
+        setIsNewChatLayout(true);
+        router.push("/");
+      }
+    } catch (err) {
+      console.error("Failed to delete conversation:", err);
+    } finally {
+      setShowMenu(false);
+      setShowDeleteDialog(false);
+    }
+  }, [activeConversationId, pendingDeleteId, router, setChats, setMessages]);
+
+  const handleArchiveChat = useCallback(
+    async (conversationId: string) => {
+      try {
+        const res = await fetch(`/api/conversations/${conversationId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "archive" }),
+        });
+        if (!res.ok) return;
+        // For now we don't change the visual state; archived conversations
+        // can still appear in the list until a future filter is added.
+      } catch (err) {
+        console.error("Failed to archive chat from sidebar:", err);
+      }
+    },
+    []
+  );
+
+  const handleRenameChat = useCallback(
+    async (conversationId: string, nextTitle: string) => {
+      const chat = chats.find((c) => c.id === conversationId);
+      const currentTitle = chat?.title ?? "";
+      const trimmed = nextTitle.trim();
+      if (!trimmed || trimmed === currentTitle) return;
+      try {
+        const res = await fetch(`/api/conversations/${conversationId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "rename", title: trimmed }),
+        });
+        if (!res.ok) return;
+        setChats((prev) =>
+          prev.map((chatItem) =>
+            chatItem.id === conversationId
+              ? { ...chatItem, title: trimmed }
+              : chatItem
+          )
+        );
+      } catch (err) {
+        console.error("Failed to rename chat:", err);
+      }
+    },
+    [chats, t]
+  );
 
   useEffect(() => {
     debugOffsetRef.current = debugOffset;
@@ -316,6 +816,20 @@ export default function ChatClientPage({
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
     };
+  }, []);
+
+  useEffect(() => {
+    try {
+      const stored = typeof window !== "undefined"
+        ? window.sessionStorage.getItem("va-toast")
+        : null;
+      if (stored) {
+        setToast({ message: stored, tone: "error" });
+        window.sessionStorage.removeItem("va-toast");
+      }
+    } catch {
+      // ignore storage errors
+    }
   }, []);
 
   function handleDebugDragStart(e: React.MouseEvent) {
@@ -448,321 +962,128 @@ export default function ChatClientPage({
       className={`min-h-screen overflow-hidden ${
         isDark
           ? "bg-neutral-800 text-slate-100"
-          : "bg-zinc-50 text-slate-900"
+          : "bg-white text-slate-900"
       }`}
-      style={isDark ? { backgroundImage: labTheme.gradients.canvas } : undefined}
     >
       <div className="flex h-screen overflow-hidden">
         {/* Desktop sidebar (md and up) */}
-        <aside
+         <aside
           className={`relative hidden h-full flex-col border-r backdrop-blur-xl md:flex ${
             isDark
               ? sidebarCollapsed
                 ? "border-white/5 bg-neutral-800/80"
-                : "border-white/5 bg-neutral-800/70"
+                : "border-white/5 bg-neutral-900"
               : sidebarCollapsed
               ? "border-zinc-200/60 bg-white/70"
               : "border-zinc-200/60 bg-zinc-50"
           }`}
           style={{ width: sidebarCollapsed ? 52 : 260 }}
         >
-          <div className="flex items-center gap-2 px-2 py-2">
-            <IconButton
-              onClick={() => {
-                if (sidebarCollapsed) {
-                  setSidebarCollapsedAndPersist(false);
-                }
-              }}
-              className="group rounded-xl"
-              isDark={isDark}
-              aria-label={
-                sidebarCollapsed
-                  ? t("chat.aria.sidebar.expand")
-                  : t("chat.aria.sidebar.menu")
-              }
-            >
-              {sidebarCollapsed ? (
-                <>
-                  <Aperture className="h-5 w-5 group-hover:hidden" />
-                  <PanelLeft className="hidden h-5 w-5 group-hover:inline-block" />
-                </>
-              ) : (
-                <Aperture className="h-5 w-5" />
-              )}
-            </IconButton>
-            {!sidebarCollapsed && (
-              <IconButton
-                className={`ml-auto rounded-xl text-sm font-semibold ${
-                  isDark ? "text-gray-400" : "text-gray-500"
-                }`}
-                isDark={isDark}
-                onClick={() => {
-                  if (showMobileSidebar) {
-                    setShowMobileSidebar(false);
-                  } else {
-                    setSidebarCollapsedAndPersist(true);
-                  }
-                }}
-              >
-                {showMobileSidebar ? (
-                  <Tooltip label={t("chat.sidebar.close")}>
-                    <span>
-                      <X className="h-5 w-5" />
-                    </span>
-                  </Tooltip>
-                ) : (
-                  <Tooltip label={t("chat.sidebar.collapse")}>
-                    <span>
-                      <PanelLeft className="h-5 w-5" />
-                    </span>
-                  </Tooltip>
-                )}
-              </IconButton>
-            )}
-          </div>
-
-          <div className="mt-2 space-y-1 px-2">
-            {["new", "search", "settings"].map((key) => {
-              const icon =
-                key === "new"
-                  ? MessageSquare
-                  : key === "search"
-                  ? Search
-                  : Settings;
-              const Icon = icon;
-              const label =
-                key === "new"
-                  ? t("chat.sidebar.newChat")
-                  : key === "search"
-                  ? t("chat.sidebar.search")
-                  : t("chat.sidebar.settings");
-              const shortcut =
-                key === "new" ? "⇧ ⌘ O" : key === "search" ? "⌘ K" : "";
-              return (
-                <button
-                  key={key}
-                  className={`group flex w-full items-center rounded-xl px-2 py-2 text-left transition cursor-pointer ${
-                    isDark ? "hover:bg-white/5" : "hover:bg-zinc-100"
-                  }`}
-                  type="button"
-                  onClick={() => {
-                    if (key === "settings") {
-                      setShowSettingsDialog(true);
-                    } else if (key === "new") {
-                      setMessages([]);
-                      setInput("");
-                      setIsNewChatLayout(true);
-                    }
-                  }}
-                >
-                  {sidebarCollapsed ? (
-                    <Tooltip
-                      label={
-                        shortcut ? (
-                          <span className="flex items-center gap-2">
-                            <span>{label}</span>
-                            <span className="text-zinc-400">{shortcut}</span>
-                          </span>
-                        ) : (
-                          label
-                        )
-                      }
-                    >
-                      <div className="flex w-full justify-center">
-                        <Icon
-                          className={`h-5 w-5 ${
-                            isDark ? "text-slate-200" : "text-slate-700"
-                          }`}
-                        />
-                      </div>
-                    </Tooltip>
-                  ) : (
-                    <>
-                      <div className="flex flex-1 items-center gap-3">
-                        <Icon
-                          className={`h-5 w-5 ${
-                            isDark ? "text-slate-200" : "text-slate-700"
-                          }`}
-                        />
-                        <span
-                          className={`text-sm font-medium ${
-                            isDark ? "text-slate-100" : "text-slate-900"
-                          }`}
-                        >
-                          {key === "new"
-                            ? t("chat.sidebar.newChat")
-                            : key === "search"
-                            ? t("chat.sidebar.search")
-                            : t("chat.sidebar.settings")}
-                        </span>
-                      </div>
-                      {key === "new" && (
-                        <span className="ml-auto mr-1 text-xs font-medium text-gray-400 opacity-0 group-hover:opacity-100 group-hover:text-gray-500 transition-opacity">
-                          ⇧ ⌘ O
-                        </span>
-                      )}
-                      {key === "search" && (
-                        <span className="ml-auto mr-1 text-xs font-medium text-gray-400 opacity-0 group-hover:opacity-100 group-hover:text-gray-500 transition-opacity">
-                          ⌘ K
-                        </span>
-                      )}
-                    </>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-
-          {loggedIn && (
-            <div className="mt-auto px-2 py-3">
-              <button
-                type="button"
-                onClick={() => setShowUserMenu((prev) => !prev)}
-                className={`group flex items-center rounded-xl px-2 py-2 text-left text-sm transition ${
-                  sidebarCollapsed
-                    ? "mx-auto h-10 w-10 justify-center"
-                    : "w-full gap-3"
-                } ${isDark ? "hover:bg-white/5" : "hover:bg-zinc-100"}`}
-              >
-                <User
-                  className={`h-6 w-6 ${
-                    isDark ? "text-slate-200" : "text-slate-700"
-                  }`}
-                />
-                {!sidebarCollapsed && (
-                  <div className="ml-2 flex flex-col">
-                    <span
-                      className={`text-sm font-medium ${
-                        isDark ? "text-slate-100" : "text-slate-900"
-                      }`}
-                    >
-                      {userEmail || t("chat.profile.email")}
-                    </span>
-                  </div>
-                )}
-              </button>
-            </div>
-          )}
+          <Sidebar
+            isDark={isDark}
+            sidebarCollapsed={sidebarCollapsed}
+            showMobileSidebar={false}
+            chats={chats}
+            activeChatId={activeChatId}
+            loggedIn={loggedIn}
+            userEmail={userEmail}
+            userName={userName}
+            userImage={userImage}
+            isAdminUser={isAdminUser}
+            t={t}
+            onToggleSidebarCollapse={() =>
+              setSidebarCollapsedAndPersist(!sidebarCollapsed)
+            }
+            onNewChat={() => {
+              setMessages([]);
+              setInput("");
+              setIsNewChatLayout(true);
+              setActiveChatId(null);
+              setActiveConversationId(null);
+              persistedMessageIdsRef.current = new Set();
+              router.push("/");
+            }}
+            onSelectChat={(id) => {
+              setActiveChatId(id);
+              setActiveConversationId(id);
+              router.push(`/c/${id}`);
+            }}
+            onOpenSettings={() => setShowSettingsDialog(true)}
+            onOpenPlatform={() => {
+              router.push("/platform");
+              setShowUserMenu(false);
+            }}
+            onToggleUserMenu={() => setShowUserMenu((prev) => !prev)}
+            showUserMenu={showUserMenu}
+            onArchiveChat={handleArchiveChat}
+            onDeleteChat={(id) => {
+              setPendingDeleteId(id);
+              setShowDeleteDialog(true);
+            }}
+            onRenameChat={handleRenameChat}
+          />
         </aside>
 
         {/* Mobile sidebar curtain (below md) */}
         {showMobileSidebar && (
-          <aside
-            className={`fixed inset-y-0 left-0 z-40 flex h-full w-[60vw] max-w-sm flex-col border-r shadow-2xl backdrop-blur-xl md:hidden ${
-              isDark
-                ? "border-white/5 bg-neutral-800/90"
-                : "border-zinc-200/60 bg-white"
-            }`}
-          >
-            <div className="flex items-center gap-2 px-2 py-2">
-              <IconButton
-                className="group rounded-xl"
+          <>
+            <div
+              className="fixed inset-0 z-30 bg-black/50 md:hidden"
+              onClick={() => setShowMobileSidebar(false)}
+              aria-hidden
+            />
+            <aside
+              className={`fixed inset-y-0 left-0 z-40 flex h-full w-[60vw] max-w-sm flex-col border-r shadow-2xl backdrop-blur-xl md:hidden ${
+                isDark
+                  ? "border-white/5 bg-neutral-800/90"
+                  : "border-zinc-200/60 bg-white"
+              }`}
+            >
+              <Sidebar
                 isDark={isDark}
-                aria-label={t("chat.aria.sidebar.menu")}
-              >
-                <Aperture className="h-5 w-5" />
-              </IconButton>
-              <IconButton
-                className="ml-auto rounded-xl"
-                isDark={isDark}
-                onClick={() => setShowMobileSidebar(false)}
-                aria-label={t("chat.sidebar.close")}
-              >
-                <X className="h-5 w-5" />
-              </IconButton>
-            </div>
-
-            <div className="mt-2 space-y-1 px-2">
-              {["new", "search", "settings"].map((key) => {
-                const icon =
-                  key === "new"
-                    ? MessageSquare
-                    : key === "search"
-                    ? Search
-                    : Settings;
-                const Icon = icon;
-                const label =
-                  key === "new"
-                    ? t("chat.sidebar.newChat")
-                    : key === "search"
-                    ? t("chat.sidebar.search")
-                    : t("chat.sidebar.settings");
-                const shortcut =
-                  key === "new" ? "⇧ ⌘ O" : key === "search" ? "⌘ K" : "";
-                return (
-                  <button
-                    key={key}
-                    className={`group flex w-full items-center rounded-xl px-2 py-2 text-left transition cursor-pointer ${
-                      isDark ? "hover:bg-white/5" : "hover:bg-zinc-100"
-                    }`}
-                    type="button"
-                    onClick={() => {
-                      if (key === "settings") {
-                        setShowSettingsDialog(true);
-                      } else if (key === "new") {
-                        setMessages([]);
-                        setInput("");
-                        setIsNewChatLayout(true);
-                      }
-                      setShowMobileSidebar(false);
-                    }}
-                  >
-                    <div className="flex flex-1 items-center gap-3">
-                      <Icon
-                        className={`h-5 w-5 ${
-                          isDark ? "text-slate-200" : "text-slate-700"
-                        }`}
-                      />
-                      <span
-                        className={`text-sm font-medium ${
-                          isDark ? "text-slate-100" : "text-slate-900"
-                        }`}
-                      >
-                        {label}
-                      </span>
-                    </div>
-                    {key === "new" && (
-                      <span className="ml-auto mr-1 text-xs font-medium text-gray-400">
-                        ⇧ ⌘ O
-                      </span>
-                    )}
-                    {key === "search" && (
-                      <span className="ml-auto mr-1 text-xs font-medium text-gray-400">
-                        ⌘ K
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-
-            {loggedIn && (
-              <div className="mt-auto px-2 py-3">
-                <button
-                  type="button"
-                  onClick={() => setShowUserMenu((prev) => !prev)}
-                  className={`group flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left text-sm transition ${
-                    isDark ? "hover:bg-white/5" : "hover:bg-zinc-100"
-                  }`}
-                >
-                  <User
-                    className={`h-6 w-6 ${
-                      isDark ? "text-slate-200" : "text-slate-700"
-                    }`}
-                  />
-                  <div className="ml-2 flex flex-col">
-                    <span
-                      className={`text-sm font-medium ${
-                        isDark ? "text-slate-100" : "text-slate-900"
-                      }`}
-                    >
-                      {userEmail || t("chat.profile.email")}
-                    </span>
-                  </div>
-                </button>
-              </div>
-            )}
-          </aside>
+                sidebarCollapsed={false}
+                showMobileSidebar={true}
+                chats={chats}
+                activeChatId={activeChatId}
+                loggedIn={loggedIn}
+                userEmail={userEmail}
+                userName={userName}
+                userImage={userImage}
+                isAdminUser={isAdminUser}
+                t={t}
+                onToggleSidebarCollapse={() => undefined}
+                onNewChat={() => {
+                  setMessages([]);
+                  setInput("");
+                  setIsNewChatLayout(true);
+                  setActiveChatId(null);
+                  setActiveConversationId(null);
+                  persistedMessageIdsRef.current = new Set();
+                  router.push("/");
+                }}
+                onSelectChat={(id) => {
+                  setActiveChatId(id);
+                  setActiveConversationId(id);
+                  setShowMobileSidebar(false);
+                  router.push(`/c/${id}`);
+                }}
+                onOpenSettings={() => setShowSettingsDialog(true)}
+                onOpenPlatform={() => {
+                  router.push("/platform");
+                  setShowUserMenu(false);
+                }}
+                onToggleUserMenu={() => setShowUserMenu((prev) => !prev)}
+                showUserMenu={showUserMenu}
+                onCloseMobileSidebar={() => setShowMobileSidebar(false)}
+                onArchiveChat={handleArchiveChat}
+                onDeleteChat={(id) => {
+                  setPendingDeleteId(id);
+                  setShowDeleteDialog(true);
+                }}
+                onRenameChat={handleRenameChat}
+              />
+            </aside>
+          </>
         )}
 
         {loggedIn && showUserMenu && (
@@ -782,8 +1103,37 @@ export default function ChatClientPage({
               <div className="px-4 pt-3 pb-2">
                 <div className="flex items-center justify-between gap-2 text-sm text-gray-500">
                   <div className="flex items-center gap-2">
-                    <UserCircle2 className="h-4 w-4" />
-                    <span className="truncate">{userEmail}</span>
+                    <div className="flex h-7 w-7 items-center justify-center rounded-full bg-gray-800 overflow-hidden">
+                      {userImage ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={userImage}
+                          alt={userName || userEmail || "User avatar"}
+                          className="h-full w-full object-cover"
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : (
+                        <UserCircle2 className="h-5 w-5" />
+                      )}
+                    </div>
+                    <div className="flex flex-col">
+                      <span
+                        className={`truncate text-sm font-medium ${
+                          isDark ? "text-gray-100" : "text-gray-900"
+                        }`}
+                      >
+                        {userName || userEmail || t("chat.profile.email")}
+                      </span>
+                      {userName && userEmail && (
+                        <span
+                          className={`truncate text-xs ${
+                            isDark ? "text-gray-400" : "text-gray-500"
+                          }`}
+                        >
+                          {userEmail}
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <button
                     type="button"
@@ -830,8 +1180,8 @@ export default function ChatClientPage({
                   type="button"
                   className={`mb-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm ${
                     isDark
-                      ? "text-gray-100 hover:bg-white/5"
-                      : "text-gray-800 hover:bg-zinc-50"
+                      ? "text-gray-100 hover:bg-white/10"
+                      : "text-gray-800 hover:bg-zinc-100"
                   }`}
                 >
                   <UserPlus className="h-4 w-4" />
@@ -841,8 +1191,8 @@ export default function ChatClientPage({
                   type="button"
                   className={`mb-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm ${
                     isDark
-                      ? "text-gray-100 hover:bg-white/5"
-                      : "text-gray-800 hover:bg-zinc-50"
+                      ? "text-gray-100 hover:bg-white/10"
+                      : "text-gray-800 hover:bg-zinc-100"
                   }`}
                 >
                   <PanelLeft className="h-4 w-4" />
@@ -852,8 +1202,8 @@ export default function ChatClientPage({
                   type="button"
                   className={`mb-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm ${
                     isDark
-                      ? "text-gray-100 hover:bg-white/5"
-                      : "text-gray-800 hover:bg-zinc-50"
+                      ? "text-gray-100 hover:bg-white/10"
+                      : "text-gray-800 hover:bg-zinc-100"
                   }`}
                 >
                   <Wand2 className="h-4 w-4" />
@@ -863,8 +1213,8 @@ export default function ChatClientPage({
                   type="button"
                   className={`mb-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm ${
                     isDark
-                      ? "text-gray-100 hover:bg-white/5"
-                      : "text-gray-800 hover:bg-zinc-50"
+                      ? "text-gray-100 hover:bg-white/10"
+                      : "text-gray-800 hover:bg-zinc-100"
                   }`}
                 >
                   <Settings className="h-4 w-4" />
@@ -881,8 +1231,8 @@ export default function ChatClientPage({
                   type="button"
                   className={`mb-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm text-left ${
                     isDark
-                      ? "text-gray-100 hover:bg-white/5"
-                      : "text-gray-800 hover:bg-zinc-50"
+                      ? "text-gray-100 hover:bg-white/10"
+                      : "text-gray-800 hover:bg-zinc-100"
                   }`}
                 >
                   <HelpCircle className="h-4 w-4" />
@@ -898,8 +1248,8 @@ export default function ChatClientPage({
                   }}
                   className={`mb-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium cursor-pointer ${
                     isDark
-                      ? "text-gray-100 hover:bg-white/5"
-                      : "text-gray-800 hover:bg-zinc-50"
+                      ? "text-gray-100 hover:bg-white/10"
+                      : "text-gray-800 hover:bg-zinc-100"
                   }`}
                 >
                   <LogOut className="h-4 w-4" />
@@ -918,83 +1268,22 @@ export default function ChatClientPage({
           />
         )}
         <div className="flex flex-1 flex-col min-w-0 backdrop-blur-xl">
-          <header
-            className={`sticky top-0 z-20 flex flex-wrap items-center justify-between gap-2 border-b bg-transparent px-2 py-2 transition-colors md:flex ${
-              showHeaderDivider ? "border-white/10" : "border-transparent"
-            } ${callStatus === "in_call" || callStatus === "calling" ? "hidden" : "flex"} relative`}
-          >
-            <div className="flex items-center gap-1.5">
-              <IconButton
-                onClick={() => setShowMobileSidebar((prev) => !prev)}
-                className={`md:hidden rounded-lg ${
-                  isDark ? "text-white" : "text-slate-900"
-                }`}
-                aria-label={t("chat.aria.header.toggleMenu")}
-              >
-                <Menu className="h-5 w-5" />
-              </IconButton>
-              <div
-                className={`flex h-10 items-center gap-2 rounded-lg border px-3 transition ${
-                  isDark
-                    ? "border-transparent bg-transparent hover:border-transparent hover:bg-white/5"
-                    : "border-transparent bg-transparent hover:border-transparent hover:bg-zinc-100"
-                }`}
-              >
-                <span
-                  className={`text-lg font-normal ${
-                    isDark ? "text-white" : "text-slate-900"
-                  }`}
-                >
-                  Voice Agent
-                </span>
-                <span
-                  className={`status-dot ${wsConnected ? "dot-online" : "dot-offline"} h-2.5 w-2.5`}
-                  aria-hidden
-                />
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              {loggedIn ? (
-                <IconButton
-                  isDark={isDark}
-                  variant="ghost"
-                  className="rounded-lg"
-                  onClick={() => setShowMenu((prev) => !prev)}
-                >
-                  <Tooltip label={t("chat.menu.moreOptions")}>
-                    <span>
-                      <Ellipsis className="h-5 w-5" />
-                    </span>
-                  </Tooltip>
-                </IconButton>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setShowLoginDialog(true)}
-                  className={`inline-flex cursor-pointer rounded-full px-4 py-2 text-sm font-medium ${
-                    isDark
-                      ? "bg-white text-neutral-900 hover:bg-gray-100"
-                      : "bg-black text-white hover:bg-neutral-900"
-                  }`}
-                >
-                  {t("chat.login.open")}
-                </button>
-              )}
-              {!loggedIn && (
-                <button
-                  type="button"
-                  className={`flex h-9 w-9 items-center justify-center rounded-full text-xs font-semibold cursor-pointer ${
-                    isDark
-                      ? "text-white hover:bg-white/10"
-                      : "text-slate-800 hover:bg-zinc-100"
-                  }`}
-                >
-                  <CircleQuestionMark className="h-5 w-5" />
-                </button>
-              )}
-            </div>
-          </header>
+          <ChatHeader
+            isDark={isDark}
+            wsConnected={wsConnected}
+            callStatus={callStatus}
+            loggedIn={loggedIn}
+            showMenu={showMenu}
+            onToggleMenu={() => setShowMenu((prev) => !prev)}
+            onToggleMobileSidebar={() =>
+              setShowMobileSidebar((prev) => !prev)
+            }
+            onOpenLogin={() => setShowLoginDialog(true)}
+            assistants={assistants}
+            activeAssistantId={activeAssistantId}
+            onChangeAssistant={(id) => setActiveAssistantId(id)}
+            t={t}
+          />
 
           {callActive && (
             <>
@@ -1014,7 +1303,7 @@ export default function ChatClientPage({
             </>
           )}
 
-          {loggedIn && showMenu && (
+          {loggedIn && showMenu && (activeConversationId || isAdminUser) && (
             <>
               <div
                 className="fixed inset-0 z-20"
@@ -1028,24 +1317,73 @@ export default function ChatClientPage({
                     : "border-zinc-200 bg-white"
                 }`}
               >
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowDebug((prev) => !prev);
-                    setShowMenu(false);
-                  }}
-                  className={`flex w-full items-center gap-2 rounded-t-xl px-3 py-2 text-[15px] cursor-pointer ${
-                    isDark
-                      ? "text-slate-100 hover:bg-white/10"
-                      : "text-slate-800 hover:bg-zinc-50"
-                  }`}
-                >
-                  <Bug className="h-3.5 w-3.5 text-sky-300" />
-                  <span className="flex-1 text-left">
-                    {t("chat.menu.debug")} {showDebug ? "(on)" : "(off)"}
-                  </span>
-                </button>
-                {/* Additional menu entries removed: theme and language now live in Settings dialog */}
+                {activeConversationId && (
+                  <>
+                    <div className="px-1 pt-1">
+                      <button
+                        type="button"
+                        onClick={handleArchiveConversation}
+                        className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-[15px] cursor-pointer ${
+                          isDark
+                            ? "text-slate-100 hover:bg-white/10"
+                            : "text-slate-800 hover:bg-zinc-50"
+                        }`}
+                      >
+                        <Archive className="h-3.5 w-3.5" />
+                        <span className="flex-1 text-left">
+                          {t("chat.menu.archive")}
+                        </span>
+                      </button>
+                    </div>
+                    <div className="px-1 pb-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowMenu(false);
+                          setShowDeleteDialog(true);
+                        }}
+                        className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-[15px] cursor-pointer ${
+                          isDark
+                            ? "text-red-300 hover:bg-red-500/10"
+                            : "text-red-600 hover:bg-red-50"
+                        }`}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        <span className="flex-1 text-left">
+                          {t("chat.menu.delete")}
+                        </span>
+                      </button>
+                    </div>
+                    {isAdminUser && (
+                      <div
+                        className={`mx-3 my-1 h-px ${
+                          isDark ? "bg-white/10" : "bg-zinc-200"
+                        }`}
+                      />
+                    )}
+                  </>
+                )}
+                {isAdminUser && (
+                  <div className="px-1 pb-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowDebug((prev) => !prev);
+                        setShowMenu(false);
+                      }}
+                      className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-[15px] cursor-pointer ${
+                        isDark
+                          ? "text-slate-100 hover:bg-white/10"
+                          : "text-slate-800 hover:bg-zinc-50"
+                      }`}
+                    >
+                      <Bug className="h-3.5 w-3.5 text-sky-300" />
+                      <span className="flex-1 text-left">
+                        {t("chat.menu.debug")} {showDebug ? "(on)" : "(off)"}
+                      </span>
+                    </button>
+                  </div>
+                )}
               </div>
             </>
           )}
@@ -1069,7 +1407,9 @@ export default function ChatClientPage({
               ref={chatRef}
               className="relative flex-1 overflow-y-auto pt-6 pb-4 pr-1"
             >
-              {isNewChatLayout && visibleMessages.length === 0 && (
+              {!initialChatId &&
+                isNewChatLayout &&
+                visibleMessages.length === 0 && (
                 <div className="mx-auto flex w-full max-w-3xl flex-col items-center justify-center px-1 pt-48 pb-16 text-center">
                   <h1
                     className={`text-3xl font-semibold tracking-tight ${
@@ -1088,14 +1428,9 @@ export default function ChatClientPage({
                   {shouldShowInput && (
                     <div className="mt-6 w-full max-w-3xl">
                       <div className="relative">
-                        <input
-                          type="text"
+                        <ChatTextInput
                           ref={inputRef}
-                        className={`h-14 w-full rounded-full border pl-5 pr-16 text-base placeholder:text-neutral-400 focus:outline-none ${
-                          isDark
-                            ? "border-white/10 bg-white/5 text-slate-100"
-                            : "border-zinc-300 bg-white/80 text-slate-900"
-                        }`}
+                          isDark={isDark}
                           placeholder={t("chat.input.placeholderIdle")}
                           value={input}
                           onChange={(e) => setInput(e.target.value)}
@@ -1125,19 +1460,19 @@ export default function ChatClientPage({
                                 callStatus !== "calling" &&
                                 callStatus !== "in_call"
                               ) {
-                                handleStartCall();
-                                setShowMobileControls(true);
-                              }
-                            }}
-                            className={`absolute right-2 top-1/2 -mt-1.5 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border text-base font-semibold transition focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed ${
-                              hasTypedInput
-                                ? isDark
-                                  ? "border-white/20 bg-white/10 text-white hover:bg-white/20 cursor-pointer"
-                                  : "border-zinc-300 bg-zinc-100 text-slate-900 hover:border-zinc-400 hover:bg-zinc-200 cursor-pointer"
-                                : isDark
-                                ? "border-white/30 bg-white/15 text-white/80 hover:border-white/40 hover:bg-white/25 hover:text-white cursor-pointer"
-                                : "border-zinc-300 bg-zinc-100 text-slate-800 hover:border-zinc-400 hover:bg-zinc-200 cursor-pointer"
-                            }`}
+                            handleStartCall();
+                            setShowMobileControls(true);
+                          }
+                        }}
+                        className={`absolute right-2 top-1/2 -mt-1.5 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border text-base font-semibold transition focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed ${
+                          hasTypedInput
+                            ? isDark
+                              ? "border-transparent bg-white text-slate-900 hover:bg-zinc-300 cursor-pointer"
+                              : "border-transparent bg-zinc-900 text-white hover:bg-zinc-600 cursor-pointer"
+                            : isDark
+                            ? "border-transparent bg-white text-slate-900 hover:bg-zinc-300 cursor-pointer"
+                            : "border-transparent bg-zinc-900 text-white hover:bg-zinc-600 cursor-pointer"
+                        }`}
                             disabled={!wsConnected || callStatus === "calling"}
                           >
                             {hasTypedInput ? (
@@ -1152,6 +1487,33 @@ export default function ChatClientPage({
                   )}
                 </div>
               )}
+
+              {initialChatId && !conversationHydrated && (
+                <div className="mx-auto flex w-full max-w-3xl items-center justify-center px-1 pt-10 pb-4">
+                  <div
+                    className={`h-6 w-6 animate-spin rounded-full border-2 border-t-transparent ${
+                      isDark
+                        ? "border-gray-500"
+                        : "border-gray-300"
+                    }`}
+                  />
+                </div>
+              )}
+
+              {initialChatId &&
+                conversationHydrated &&
+                visibleMessages.length === 0 &&
+                !conversationLoadError && (
+                  <div className="mx-auto w-full max-w-3xl px-1 pt-10 pb-4 text-sm">
+                    <p
+                      className={
+                        isDark ? "text-gray-300" : "text-gray-600"
+                      }
+                    >
+                      {t("chat.emptyConversation")}
+                    </p>
+                  </div>
+                )}
 
               <div className="mx-auto flex max-w-3xl flex-col gap-2">
                 {visibleMessages.map((message, idx) => {
@@ -1581,18 +1943,62 @@ export default function ChatClientPage({
               </div>
             )}
 
+            {toast && (
+              <div className="pointer-events-none absolute inset-x-0 top-4 z-[80] flex justify-center">
+                <div
+                  className={`pointer-events-auto inline-flex items-center gap-3 rounded-full px-4 py-2 text-sm shadow-lg ${
+                    toast.tone === "error"
+                      ? isDark
+                        ? "bg-red-600 text-white"
+                        : "bg-red-500 text-white"
+                      : isDark
+                      ? "bg-neutral-700 text-white"
+                      : "bg-neutral-100 text-gray-900"
+                  }`}
+                >
+                  <span>{toast.message}</span>
+                  <button
+                    type="button"
+                    onClick={() => setToast(null)}
+                    className="flex h-5 w-5 items-center justify-center rounded-full bg-black/10 text-current hover:bg-black/20 focus:outline-none"
+                    aria-label="Dismiss message"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {showDeleteDialog && pendingDeleteId && (
+              <ConfirmDialog
+                open={showDeleteDialog}
+                title={t("chat.menu.deleteTitle")}
+                message={
+                  <span>
+                    {t("chat.menu.deleteBody")}{" "}
+                      <strong>
+                      {chats.find((c) => c.id === pendingDeleteId)?.title ??
+                        t("chat.sidebar.newChat")}
+                    </strong>
+                    .
+                  </span>
+                }
+                helperText={t("chat.menu.deleteHelper")}
+                confirmLabel={t("chat.menu.delete")}
+                cancelLabel={t("common.cancel")}
+                variant="danger"
+                onConfirm={handleDeleteConversation}
+                onCancel={() => setShowDeleteDialog(false)}
+              />
+            )}
+
             {!isNewChatLayout && shouldShowInput && (
               <div className="mx-auto w-full max-w-3xl px-1 sm:px-1 pb-6">
                 <div className="flex items-center gap-3">
                   <div className="relative flex-1">
-                    <input
-                      type="text"
+                    <ChatTextInput
                       ref={inputRef}
-                      className={`h-14 w-full rounded-full border pl-5 pr-16 text-base placeholder:text-neutral-400 focus:outline-none ${
-                        isDark
-                          ? "border-white/10 bg-white/5 text-slate-100"
-                          : "border-zinc-300 bg-white/80 text-slate-900"
-                      }`}
+                      isDark={isDark}
                       placeholder={
                         callStatus === "in_call"
                           ? t("chat.input.placeholderInCall")
@@ -1640,13 +2046,13 @@ export default function ChatClientPage({
                         className={`absolute right-2 top-1/2 -mt-1.5 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border text-base font-semibold transition focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed ${
                           hasTypedInput
                             ? isDark
-                              ? "border-white/20 bg-white/10 text-white hover:bg-white/20 cursor-pointer"
-                              : "border-zinc-300 bg-zinc-100 text-slate-900 hover:border-zinc-400 hover:bg-zinc-200 cursor-pointer"
+                              ? "border-transparent bg-white text-slate-900 hover:bg-zinc-300 cursor-pointer"
+                              : "border-transparent bg-zinc-900 text-white hover:bg-zinc-600 cursor-pointer"
                             : callStatus === "in_call"
                             ? "border-rose-400/70 bg-rose-500/90 text-white hover:bg-rose-400 cursor-pointer"
                             : isDark
-                            ? "border-white/30 bg-white/15 text-white/80 hover:border-white/40 hover:bg-white/25 hover:text-white cursor-pointer"
-                            : "border-zinc-300 bg-zinc-100 text-slate-800 hover:border-zinc-400 hover:bg-zinc-200 cursor-pointer"
+                            ? "border-transparent bg-white text-slate-900 hover:bg-zinc-300 cursor-pointer"
+                            : "border-transparent bg-zinc-900 text-white hover:bg-zinc-600 cursor-pointer"
                         }`}
                         disabled={
                           hasTypedInput

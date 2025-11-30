@@ -26,6 +26,7 @@ type ThemeProviderProps = {
 export function ThemeProvider({ children, initialTheme }: ThemeProviderProps) {
   const [theme, setThemeState] = useState<Theme>(initialTheme);
 
+  // Apply theme to <html> and persist in a stable cookie
   useEffect(() => {
     if (typeof document === "undefined") return;
     const root = document.documentElement;
@@ -39,6 +40,46 @@ export function ThemeProvider({ children, initialTheme }: ThemeProviderProps) {
       // ignore cookie errors
     }
   }, [theme]);
+
+  // If the user selected "system" appearance, follow the OS
+  // color-scheme and react to changes over time.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+
+    const applyFromSystemIfNeeded = () => {
+      try {
+        const cookie = document.cookie
+          .split("; ")
+          .find((entry) => entry.startsWith("va-theme-mode="));
+        const mode = cookie ? cookie.split("=")[1] : null;
+        if (mode === "system") {
+          setThemeState(media.matches ? "dark" : "light");
+        }
+      } catch {
+        // ignore cookie errors
+      }
+    };
+
+    // Initial sync on mount
+    applyFromSystemIfNeeded();
+
+    const listener = () => applyFromSystemIfNeeded();
+    if (typeof media.addEventListener === "function") {
+      media.addEventListener("change", listener);
+    } else if (typeof media.addListener === "function") {
+      media.addListener(listener);
+    }
+
+    return () => {
+      if (typeof media.removeEventListener === "function") {
+        media.removeEventListener("change", listener);
+      } else if (typeof media.removeListener === "function") {
+        media.removeListener(listener);
+      }
+    };
+  }, []);
 
   const setTheme = useCallback((next: Theme) => {
     setThemeState(next);

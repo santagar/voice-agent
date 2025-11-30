@@ -81,10 +81,8 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
       >
         {/* Sidebar */}
         <div
-          className={`flex w-48 shrink-0 flex-col border-r ${
-            isDark
-              ? "border-white/5 bg-neutral-900/80"
-              : "border-zinc-200/60 bg-zinc-50"
+          className={`flex w-48 shrink-0 flex-col ${
+            isDark ? "bg-neutral-900/80" : "bg-zinc-50"
           }`}
         >
           <div className="flex items-center px-3 py-3">
@@ -114,10 +112,10 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                     active
                       ? isDark
                         ? "bg-white/10 text-gray-50"
-                        : "bg-zinc-100 text-gray-900"
+                        : "bg-zinc-200 text-gray-900"
                       : isDark
                       ? "text-gray-300 hover:bg-white/5"
-                      : "text-gray-700 hover:bg-zinc-100"
+                      : "text-gray-700 hover:bg-zinc-200"
                   }`}
                 >
                   <Icon className="h-4 w-4" />
@@ -129,7 +127,11 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
         </div>
 
         {/* Main content */}
-        <div className="flex flex-1 flex-col px-6 py-6">
+        <div
+          className={`flex flex-1 flex-col px-6 py-6 ${
+            isDark ? "bg-neutral-800" : "bg-white"
+          }`}
+        >
           {activeSection === "general" ? (
             <div className="flex flex-col gap-6">
               <div

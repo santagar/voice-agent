@@ -16,6 +16,7 @@ import path from "path";
 // @ts-ignore
 import WS, { WebSocketServer } from "ws";
 import OpenAI from "openai";
+import { PrismaClient } from "@prisma/client";
 import { createVad, Vad } from "./vad";
 
 dotenv.config();
@@ -79,6 +80,8 @@ type ClientMessage =
       type: "user_message";
       text?: string;
       scope?: string;
+      conversationId?: string;
+      assistantId?: string;
     }
   | {
       type: "client.audio.chunk";
@@ -221,6 +224,15 @@ const externalApiConfig: ExternalApiConfig = {
 
 const openai = new OpenAI({
   apiKey: OPENAI_API_KEY,
+});
+
+// Dedicated Prisma client for the realtime bridge. We keep this
+// local to the bridge process instead of importing the Next.js
+// helper from lib/ to avoid cross-build coupling between the
+// app bundle and the standalone Node server.
+const prisma = new PrismaClient({
+  log:
+    process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
 });
 
 const sessionInstructions = buildSessionInstructions(profile);
@@ -517,7 +529,8 @@ function getPineconeConfig(): PineconeConfig | null {
 async function handleToolCall(
   openAiSocket: { send: (data: string) => void },
   clientSocket: { send: (data: string) => void },
-  toolCall: ToolCall
+  toolCall: ToolCall,
+  context?: { conversationId?: string | null; assistantId?: string | null }
 ) {
   const toolCallId = toolCall?.id;
   const toolName = toolCall?.name;
@@ -532,10 +545,44 @@ async function handleToolCall(
   }
 
   let outputPayload: any = {};
+  const conversationId = context?.conversationId || null;
+  const assistantId = context?.assistantId || null;
+
+  let dbToolCallId: string | null = null;
 
   try {
     const toolMeta = toolName ? toolMap.get(toolName) : undefined;
     const displayName = toolMeta?.name || toolName || "unknown_tool";
+
+    // Persist the ToolCall start if we can associate it with a
+    // concrete conversation + assistant. If we don't yet have
+    // that context (e.g. pure voice greeting), we still execute
+    // the tool but skip DB persistence.
+    if (conversationId && assistantId) {
+      console.log(
+        "Persisting ToolCall start for conversation",
+        conversationId,
+        "assistant",
+        assistantId,
+        "tool",
+        displayName
+      );
+      try {
+        const created = await prisma.toolCall.create({
+          data: {
+            conversationId,
+            assistantId,
+            name: displayName,
+            kind: toolMeta?.kind || "business",
+            status: "started",
+            inputJson: args,
+          },
+        });
+        dbToolCallId = created.id;
+      } catch (err) {
+        console.error("Failed to persist ToolCall start:", err);
+      }
+    }
 
     // Log start after we have resolved the tool metadata so
     // we can show a stable name (lookup_booking, etc.) instead
@@ -571,6 +618,21 @@ async function handleToolCall(
       args,
       message: err instanceof Error ? err.message : String(err),
     });
+
+    if (dbToolCallId) {
+      try {
+        await prisma.toolCall.update({
+          where: { id: dbToolCallId },
+          data: {
+            status: "failed",
+            error: err instanceof Error ? err.message : String(err),
+            completedAt: new Date(),
+          },
+        });
+      } catch (dbErr) {
+        console.error("Failed to persist ToolCall failure:", dbErr);
+      }
+    }
   }
 
   if (!outputPayload.error) {
@@ -579,6 +641,78 @@ async function handleToolCall(
       status: "succeeded",
       args,
     });
+
+    if (dbToolCallId) {
+      try {
+        await prisma.toolCall.update({
+          where: { id: dbToolCallId },
+          data: {
+            status: "succeeded",
+            resultJson: outputPayload,
+            completedAt: new Date(),
+            error: null,
+          },
+        });
+      } catch (dbErr) {
+        console.error("Failed to persist ToolCall success:", dbErr);
+      }
+    }
+  } else if (dbToolCallId) {
+    // We already logged the failure case above in the catch block.
+    try {
+      await prisma.toolCall.update({
+        where: { id: dbToolCallId },
+        data: {
+          status: "failed",
+          resultJson: outputPayload,
+          completedAt: new Date(),
+          error:
+            typeof outputPayload.error === "string"
+              ? outputPayload.error
+              : JSON.stringify(outputPayload.error),
+        },
+      });
+    } catch (dbErr) {
+      console.error("Failed to persist ToolCall error payload:", dbErr);
+    }
+  }
+
+  // Create a lightweight system message linked to the tool call so
+  // conversation history can show when tools were invoked without
+  // polluting the visible chat (the frontend hides system messages).
+  if (dbToolCallId && conversationId) {
+    try {
+      const last = await prisma.message.findFirst({
+        where: { conversationId },
+        orderBy: { sequence: "desc" },
+      });
+      const nextSequence = (last?.sequence ?? 0) + 1;
+      const status = outputPayload.error ? "failed" : "succeeded";
+      const displayName =
+        toolMap.get(toolName || "")?.name || toolName || "unknown_tool";
+
+      await prisma.message.create({
+        data: {
+          conversationId,
+          from: "system",
+          text: `Tool call ${displayName} (${status})`,
+          sequence: nextSequence,
+          toolCallId: dbToolCallId,
+          meta: {
+            turnType: "tool_call",
+            toolName: displayName,
+            toolStatus: status,
+          },
+        },
+      });
+
+      await prisma.conversation.update({
+        where: { id: conversationId },
+        data: { updatedAt: new Date() },
+      });
+    } catch (dbErr) {
+      console.error("Failed to persist ToolCall message:", dbErr);
+    }
   }
 
   const toolOutputItem = {
@@ -851,6 +985,10 @@ wss.on("connection", (clientSocket: WS) => {
   let inputNoiseFloor = 0;
   let inputVadActive = false;
   let inputVad: Vad | null = null;
+  // Per-connection context so we can associate tool calls
+  // with the correct conversation and assistant in the DB.
+  let currentConversationId: string | null = null;
+  let currentAssistantId: string | null = null;
 
   if (INPUT_VAD_ENABLED) {
     createVad({
@@ -958,9 +1096,10 @@ wss.on("connection", (clientSocket: WS) => {
       const toolCalls: ToolCall[] =
         parsed.required_action.submit_tool_outputs?.tool_calls || [];
       for (const call of toolCalls) {
-        handleToolCall(openAiSocket, clientSocket, call).catch((err) =>
-          console.error("Tool handler error:", err)
-        );
+        handleToolCall(openAiSocket, clientSocket, call, {
+          conversationId: currentConversationId,
+          assistantId: currentAssistantId,
+        }).catch((err) => console.error("Tool handler error:", err));
       }
     }
 
@@ -997,21 +1136,29 @@ wss.on("connection", (clientSocket: WS) => {
       pendingFunctionCalls.set(callId, existing);
     }
 
-    if (parsed.type === "response.function_call_arguments.done") {
-      const callId = parsed.call_id || parsed.id;
-      if (!callId) return;
-      const record = pendingFunctionCalls.get(callId);
-      if (!record) return;
+      if (parsed.type === "response.function_call_arguments.done") {
+        const callId = parsed.call_id || parsed.id;
+        if (!callId) return;
+        const record = pendingFunctionCalls.get(callId);
+        if (!record) return;
       const finalArgs =
         typeof parsed.arguments === "string"
           ? parsed.arguments
           : record.arguments;
       pendingFunctionCalls.delete(callId);
-      handleToolCall(openAiSocket, clientSocket, {
-        id: callId,
-        name: record.name,
-        arguments: finalArgs,
-      }).catch((err) => console.error("Tool handler error:", err));
+      handleToolCall(
+        openAiSocket,
+        clientSocket,
+        {
+          id: callId,
+          name: record.name,
+          arguments: finalArgs,
+        },
+        {
+          conversationId: currentConversationId,
+          assistantId: currentAssistantId,
+        }
+      ).catch((err) => console.error("Tool handler error:", err));
     }
 
     const safeJson = JSON.stringify(parsed);
@@ -1038,6 +1185,17 @@ wss.on("connection", (clientSocket: WS) => {
       if (msg.type === "user_message") {
         const msgText = (msg as any).text as string | undefined;
         const msgScope = (msg as any).scope as string | undefined;
+        const msgConversationId = (msg as any)
+          .conversationId as string | undefined;
+        const msgAssistantId = (msg as any)
+          .assistantId as string | undefined;
+
+        if (msgConversationId) {
+          currentConversationId = msgConversationId;
+        }
+        if (msgAssistantId) {
+          currentAssistantId = msgAssistantId;
+        }
         let userText: string = msgText || "";
         const scope: string = msgScope || "general"; // e.g. "support", "tech", etc.
 

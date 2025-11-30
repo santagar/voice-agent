@@ -18,6 +18,9 @@ type UseRealtimeVoiceSessionOptions = {
   startCallPrompt?: string;
   initialScope?: string;
   wsUrl?: string;
+  // Called whenever the Realtime API finishes an assistant turn and we
+  // have a stable transcript for that reply. Useful for persistence.
+  onAssistantTurnFinal?: (text: string) => void;
 };
 
 const ASSISTANT_PLAYBACK_RATE =
@@ -67,6 +70,7 @@ export function useRealtimeVoiceSession(
     startCallPrompt = "",
     initialScope = "support",
     wsUrl = "ws://localhost:4001",
+    onAssistantTurnFinal,
   } = options;
 
   const [messages, setMessages] = useState<VoiceMessage[]>([]);
@@ -114,6 +118,13 @@ export function useRealtimeVoiceSession(
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastUserTurnAtRef = useRef<number | null>(null);
   const wsConnectedRef = useRef(false);
+  const onAssistantTurnFinalRef = useRef<
+    ((text: string) => void) | undefined
+  >(onAssistantTurnFinal);
+
+  useEffect(() => {
+    onAssistantTurnFinalRef.current = onAssistantTurnFinal;
+  }, [onAssistantTurnFinal]);
 
   const scopeCatalog = useMemo(() => {
     const merged = new Map<string, Set<string>>();
@@ -997,6 +1008,19 @@ export function useRealtimeVoiceSession(
             }
             pendingAssistantTextRef.current = finalText;
             flushPendingAssistantText(80);
+
+            // Notify listeners (e.g. the chat UI) that this assistant
+            // turn has a final transcript, so they can persist it.
+            if (onAssistantTurnFinalRef.current) {
+              try {
+                onAssistantTurnFinalRef.current(finalText);
+              } catch (err) {
+                console.error(
+                  "onAssistantTurnFinal callback threw an error:",
+                  err
+                );
+              }
+            }
           }
 
           if (data.type === "response.done") {
@@ -1019,6 +1043,19 @@ export function useRealtimeVoiceSession(
             data.error
           ) {
             const errorCode = data?.error?.code || data?.code;
+            const hasDetails = data?.error || data?.message;
+
+            // Some realtime backends occasionally emit bare `error`
+            // events without any payload. These are not actionable and
+            // just create noise in the UI, so we log them and skip
+            // surfacing a system message.
+            if (!hasDetails && !errorCode) {
+              console.warn(
+                "Realtime error event without details (ignored):",
+                data
+              );
+              return;
+            }
             if (errorCode === "input_audio_buffer_commit_empty") {
               console.warn("Ignoring benign realtime audio error:", data);
               return;
@@ -1100,7 +1137,11 @@ export function useRealtimeVoiceSession(
 
   async function sendUserMessage(
     text: string,
-    options?: { silent?: boolean }
+    options?: {
+      silent?: boolean;
+      conversationId?: string | null;
+      assistantId?: string | null;
+    }
   ) {
     const trimmed = text.trim();
     if (
@@ -1136,13 +1177,26 @@ export function useRealtimeVoiceSession(
     }
     setLoading(true);
 
-    wsRef.current.send(
-      JSON.stringify({
-        type: "user_message",
-        text: trimmed,
-        scope: scopeForMessage,
-      })
-    );
+    const payload: {
+      type: "user_message";
+      text: string;
+      scope: string;
+      conversationId?: string;
+      assistantId?: string;
+    } = {
+      type: "user_message",
+      text: trimmed,
+      scope: scopeForMessage,
+    };
+
+    if (options?.conversationId) {
+      payload.conversationId = options.conversationId;
+    }
+    if (options?.assistantId) {
+      payload.assistantId = options.assistantId;
+    }
+
+    wsRef.current.send(JSON.stringify(payload));
   }
 
   async function handleSubmit(e: React.FormEvent) {

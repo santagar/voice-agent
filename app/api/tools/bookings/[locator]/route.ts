@@ -40,7 +40,7 @@ const MOCK_BOOKINGS: Record<
 
 export async function GET(
   _req: NextRequest,
-  context: { params: { locator: string } }
+  context: { params: Promise<{ locator: string }> }
 ) {
   const raw = await context.params;
   const rawLocator = raw?.locator?.toUpperCase();

@@ -7,9 +7,11 @@ import { useTheme } from "@/components/theme/ThemeContext";
 
 type UserMenuProps = {
   email: string;
+  name?: string | null;
+  image?: string | null;
 };
 
-export function UserMenu({ email }: UserMenuProps) {
+export function UserMenu({ email, name, image }: UserMenuProps) {
   const [open, setOpen] = useState(false);
   const { theme, setTheme } = useTheme();
   const isDark = theme === "dark";
@@ -78,14 +80,22 @@ export function UserMenu({ email }: UserMenuProps) {
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
-        className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold transition-colors ${
-          isDark
-            ? "bg-gray-200 text-neutral-900 hover:bg-white"
-            : "bg-zinc-800 text-white hover:bg-zinc-900"
+        className={`flex h-8 w-8 items-center justify-center overflow-hidden rounded-full text-xs font-semibold transition-colors ${
+          isDark ? "bg-gray-200 hover:bg-white" : "bg-zinc-800 hover:bg-zinc-900"
         }`}
         aria-label="Open account menu"
       >
-        S
+        {image ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={image}
+            alt={name || email || "User avatar"}
+            className="h-full w-full object-cover"
+            referrerPolicy="no-referrer"
+          />
+        ) : (
+          <span>{(name || email || "U").charAt(0).toUpperCase()}</span>
+        )}
       </button>
       {open && (
         <>
@@ -102,7 +112,9 @@ export function UserMenu({ email }: UserMenuProps) {
             }`}
           >
             <div className="px-4 pt-3 pb-2">
-              <p className="text-sm font-semibold">Administrator</p>
+              <p className="text-sm font-semibold">
+                {name || email || "Account"}
+              </p>
               <p
                 className={`text-xs ${
                   isDark ? "text-gray-400" : "text-gray-500"

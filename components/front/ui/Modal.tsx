@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect } from "react";
+import { createPortal } from "react-dom";
 
 type ModalProps = {
   open: boolean;
@@ -24,14 +25,19 @@ export function Modal({ open, onClose, children }: ModalProps) {
 
   if (!open) return null;
 
-  return (
+  const content = (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4"
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 px-4"
       onClick={onClose}
       aria-hidden
     >
       <div onClick={(event) => event.stopPropagation()}>{children}</div>
     </div>
   );
-}
 
+  if (typeof document === "undefined") {
+    return content;
+  }
+
+  return createPortal(content, document.body);
+}
