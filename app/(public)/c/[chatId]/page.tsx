@@ -5,13 +5,13 @@ import { authOptions } from "@/lib/auth/options";
 import { prisma } from "@/lib/prisma";
 
 type ChatByIdPageProps = {
-  params: Promise<{
+  params: {
     chatId: string;
-  }>;
+  };
 };
 
 export default async function ChatByIdPage({ params }: ChatByIdPageProps) {
-  const { chatId } = await params;
+  const { chatId } = params;
   const { sidebarCollapsed: initialSidebarCollapsed } =
     await getInitialUserPreferences();
   const session = await getServerSession(authOptions);
@@ -97,7 +97,7 @@ export default async function ChatByIdPage({ params }: ChatByIdPageProps) {
       where: { workspaceId: workspace.id, ownerId: userId },
       orderBy: { createdAt: "asc" },
     });
-    assistantOptions = assistants.map((a) => ({
+    assistantOptions = assistants.map((a: (typeof assistants)[number]) => ({
       id: a.id,
       name: a.name,
       description: a.description,
@@ -116,7 +116,7 @@ export default async function ChatByIdPage({ params }: ChatByIdPageProps) {
     },
   });
 
-  const initialChats = conversations.map((conv) => {
+  const initialChats = conversations.map((conv: (typeof conversations)[number]) => {
     const last = conv.messages[0];
     const lastFrom =
       last?.from === "user"

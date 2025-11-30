@@ -24,6 +24,7 @@ type HeaderProps = {
   assistants: AssistantSummary[];
   activeAssistantId: string | null;
   onChangeAssistant: (id: string) => void;
+  assistantSelectorDisabled?: boolean;
   t: (key: string) => string;
 };
 
@@ -39,6 +40,7 @@ export function ChatHeader({
   assistants,
   activeAssistantId,
   onChangeAssistant,
+  assistantSelectorDisabled,
   t,
 }: HeaderProps) {
   const callActive = callStatus === "calling" || callStatus === "in_call";
@@ -56,6 +58,9 @@ export function ChatHeader({
     // El header se oculta durante la llamada (comportamiento actual).
     return null;
   }
+
+  const selectedAssistant =
+    assistantOptions.find((a) => a.id === selectedId) ?? assistantOptions[0];
 
   return (
     <header
@@ -88,26 +93,40 @@ export function ChatHeader({
             aria-hidden
           />
           <div className="-ml-1.5">
-            <SelectMenu
-              isDark={isDark}
-              value={selectedId ?? ""}
-              options={assistantOptions.map((a) => ({
-                value: a.id,
-                label: a.name,
-                description: a.description ?? undefined,
-              }))}
-              align="left"
-              triggerClassName={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium cursor-pointer ${
-                isDark
-                  ? "bg-transparent text-gray-100"
-                  : "bg-transparent text-gray-800"
-              }`}
-              labelClassName="truncate text-lg"
-              onChange={(id) => {
-                if (!id) return;
-                onChangeAssistant(id);
-              }}
-            />
+            {assistantSelectorDisabled ? (
+              <div
+                className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium ${
+                  isDark
+                    ? "bg-transparent text-gray-100"
+                    : "bg-transparent text-gray-800"
+                }`}
+              >
+                <span className="truncate text-lg">
+                  {selectedAssistant?.name ?? "Voice Agent"}
+                </span>
+              </div>
+            ) : (
+              <SelectMenu
+                isDark={isDark}
+                value={selectedId ?? ""}
+                options={assistantOptions.map((a) => ({
+                  value: a.id,
+                  label: a.name,
+                  description: a.description ?? undefined,
+                }))}
+                align="left"
+                triggerClassName={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium cursor-pointer ${
+                  isDark
+                    ? "bg-transparent text-gray-100"
+                    : "bg-transparent text-gray-800"
+                }`}
+                labelClassName="truncate text-lg"
+                onChange={(id) => {
+                  if (!id) return;
+                  onChangeAssistant(id);
+                }}
+              />
+            )}
           </div>
         </div>
       </div>

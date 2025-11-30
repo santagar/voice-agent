@@ -78,6 +78,7 @@ type ChatClientProps = {
   assistantId?: string | null;
   initialChats?: ChatSummary[] | null;
   initialAssistants?: AssistantSummary[] | null;
+  initialViewMode?: "chat" | "assistant-config";
 };
 
 export default function ChatClientPage({
@@ -92,6 +93,7 @@ export default function ChatClientPage({
   assistantId = null,
   initialChats = null,
   initialAssistants = null,
+  initialViewMode = "chat",
 }: ChatClientProps) {
   const {
     messages,
@@ -311,12 +313,126 @@ export default function ChatClientPage({
       : assistantId
       ? [{ id: assistantId, name: "Voice Agent" }]
       : [];
-  const [assistants] = useState<AssistantSummary[]>(initialAssistantList);
+  const [assistants, setAssistants] =
+    useState<AssistantSummary[]>(initialAssistantList);
   const [activeAssistantId, setActiveAssistantId] = useState<string | null>(
     assistantId && initialAssistantList.some((a) => a.id === assistantId)
       ? assistantId
       : initialAssistantList[0]?.id ?? null
   );
+  const [viewMode, setViewMode] = useState<"chat" | "assistant-config">(
+    initialViewMode
+  );
+  type AssistantConfigInstruction = {
+    id: string;
+    type: string;
+    label: string | null;
+    lines: string[];
+    enabled: boolean;
+    sortOrder: number;
+  };
+  type AssistantConfigTool = {
+    id: string;
+    name: string;
+    kind: string | null;
+    description: string | null;
+    enabled: boolean;
+  };
+  type AssistantConfigRule = {
+    id: string;
+    description: string | null;
+    direction: string;
+    enabled: boolean;
+    sortOrder: number;
+  };
+  type AssistantConfig = {
+    assistant: {
+      id: string;
+      name: string;
+      description: string | null;
+    };
+    instructions: AssistantConfigInstruction[];
+    tools: AssistantConfigTool[];
+    sanitize: AssistantConfigRule[];
+  };
+  const [assistantConfig, setAssistantConfig] =
+    useState<AssistantConfig | null>(null);
+  const [assistantConfigLoading, setAssistantConfigLoading] = useState(false);
+  const [assistantConfigError, setAssistantConfigError] = useState<
+    string | null
+  >(null);
+  const [assistantConfigSaving, setAssistantConfigSaving] = useState(false);
+  const [showInstructionsModal, setShowInstructionsModal] = useState(false);
+  const [showToolsModal, setShowToolsModal] = useState(false);
+  const [showRulesModal, setShowRulesModal] = useState(false);
+  const [assistantFormName, setAssistantFormName] = useState<string>("");
+  const [assistantFormDescription, setAssistantFormDescription] = useState<
+    string
+  >("");
+  const [showInstructionEditor, setShowInstructionEditor] = useState(false);
+  const [editingInstructionId, setEditingInstructionId] = useState<
+    string | null
+  >(null);
+  const [instructionEditorType, setInstructionEditorType] = useState("");
+  const [instructionEditorLabel, setInstructionEditorLabel] = useState("");
+  const [instructionEditorText, setInstructionEditorText] = useState("");
+  const [instructionEditorSaving, setInstructionEditorSaving] =
+    useState(false);
+  const [dragInstructionId, setDragInstructionId] = useState<string | null>(
+    null
+  );
+  const instructionEditorGutterRef = useRef<HTMLDivElement | null>(null);
+  const instructionEditorTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const [instructionEditorCols, setInstructionEditorCols] = useState<number | null>(null);
+  const [instructionEditorLineHeight, setInstructionEditorLineHeight] = useState<number | null>(null);
+  const instructionEditorLines = useMemo(
+    () => instructionEditorText.split("\n"),
+    [instructionEditorText]
+  );
+  const instructionEditorRowsPerLine = useMemo(
+    () => {
+      if (!instructionEditorCols) {
+        return instructionEditorLines.map(() => 1);
+      }
+      return instructionEditorLines.map((line) => {
+        const length = line.length || 1;
+        return Math.max(1, Math.ceil(length / instructionEditorCols));
+      });
+    },
+    [instructionEditorLines, instructionEditorCols]
+  );
+
+  useEffect(() => {
+    if (!showInstructionEditor) return;
+    if (typeof window === "undefined") return;
+    const textarea = instructionEditorTextareaRef.current;
+    if (!textarea) return;
+    const style = window.getComputedStyle(textarea);
+    const lineHeightPx =
+      parseFloat(style.lineHeight || "") || parseFloat(style.fontSize || "") * 1.25 || 20;
+    const rect = textarea.getBoundingClientRect();
+    let charWidth = 8;
+    try {
+      const span = document.createElement("span");
+      span.textContent = "M";
+      span.style.fontFamily = style.fontFamily;
+      span.style.fontSize = style.fontSize;
+      span.style.position = "absolute";
+      span.style.visibility = "hidden";
+      span.style.whiteSpace = "pre";
+      document.body.appendChild(span);
+      const spanRect = span.getBoundingClientRect();
+      if (spanRect.width > 0) {
+        charWidth = spanRect.width;
+      }
+      document.body.removeChild(span);
+    } catch {
+      // fallback char width
+    }
+    const cols = Math.max(1, Math.floor(rect.width / charWidth));
+    setInstructionEditorLineHeight(lineHeightPx);
+    setInstructionEditorCols(cols);
+  }, [showInstructionEditor, instructionEditorText]);
   const handleCopy = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
@@ -418,6 +534,215 @@ export default function ChatClientPage({
     setShowInputDuringCall(false);
     setIsNewChatLayout(false);
     startCall();
+  }
+
+  useEffect(() => {
+    if (
+      !activeAssistantId ||
+      (viewMode !== "assistant-config" && !showDebug)
+    ) {
+      return;
+    }
+    let cancelled = false;
+    async function loadAssistantConfig() {
+      try {
+        setAssistantConfigLoading(true);
+        setAssistantConfigError(null);
+        const res = await fetch(
+          `/api/assistants/${activeAssistantId}/config`
+        );
+        if (!res.ok) {
+          setAssistantConfigError("Failed to load assistant configuration.");
+          return;
+        }
+        const data = (await res.json()) as AssistantConfig;
+        if (!cancelled) {
+          setAssistantConfig(data);
+        }
+      } catch (err) {
+        console.error("Failed to load assistant config:", err);
+        if (!cancelled) {
+          setAssistantConfigError("Failed to load assistant configuration.");
+        }
+      } finally {
+        if (!cancelled) {
+          setAssistantConfigLoading(false);
+        }
+      }
+    }
+    void loadAssistantConfig();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeAssistantId, viewMode, showDebug]);
+
+  useEffect(() => {
+    if (!assistantConfig) return;
+    setAssistantFormName(assistantConfig.assistant.name);
+    setAssistantFormDescription(
+      assistantConfig.assistant.description ?? ""
+    );
+  }, [assistantConfig]);
+
+  async function updateAssistantInstructions(
+    updates: { id: string; enabled: boolean; sortOrder?: number }[]
+  ) {
+    if (!activeAssistantId || !updates.length) return;
+    try {
+      setAssistantConfigSaving(true);
+      const res = await fetch(
+        `/api/assistants/${activeAssistantId}/config`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ instructions: updates }),
+        }
+      );
+      if (!res.ok) {
+        console.error("Failed to update instructions:", await res.text());
+        return;
+      }
+      setAssistantConfig((prev) =>
+        prev
+          ? {
+              ...prev,
+              instructions: prev.instructions.map((inst) => {
+                const u = updates.find((x) => x.id === inst.id);
+                return u
+                  ? {
+                      ...inst,
+                      enabled: u.enabled,
+                      sortOrder:
+                        typeof u.sortOrder === "number"
+                          ? u.sortOrder
+                          : inst.sortOrder,
+                    }
+                  : inst;
+              }),
+            }
+          : prev
+      );
+    } finally {
+      setAssistantConfigSaving(false);
+    }
+  }
+
+  async function updateAssistantTools(
+    updates: { id: string; enabled: boolean }[]
+  ) {
+    if (!activeAssistantId || !updates.length) return;
+    try {
+      setAssistantConfigSaving(true);
+      const res = await fetch(
+        `/api/assistants/${activeAssistantId}/config`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tools: updates }),
+        }
+      );
+      if (!res.ok) {
+        console.error("Failed to update tools:", await res.text());
+        return;
+      }
+      setAssistantConfig((prev) =>
+        prev
+          ? {
+              ...prev,
+              tools: prev.tools.map((tool) => {
+                const u = updates.find((x) => x.id === tool.id);
+                return u ? { ...tool, enabled: u.enabled } : tool;
+              }),
+            }
+          : prev
+      );
+    } finally {
+      setAssistantConfigSaving(false);
+    }
+  }
+
+  async function updateAssistantSanitize(
+    updates: { id: string; enabled: boolean }[]
+  ) {
+    if (!activeAssistantId || !updates.length) return;
+    try {
+      setAssistantConfigSaving(true);
+      const res = await fetch(
+        `/api/assistants/${activeAssistantId}/config`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sanitize: updates }),
+        }
+      );
+      if (!res.ok) {
+        console.error(
+          "Failed to update sanitize rules:",
+          await res.text()
+        );
+        return;
+      }
+      setAssistantConfig((prev) =>
+        prev
+          ? {
+              ...prev,
+              sanitize: prev.sanitize.map((rule) => {
+                const u = updates.find((x) => x.id === rule.id);
+                return u ? { ...rule, enabled: u.enabled } : rule;
+              }),
+            }
+          : prev
+      );
+    } finally {
+      setAssistantConfigSaving(false);
+    }
+  }
+
+  async function saveAssistantBasics() {
+    if (!activeAssistantId) return;
+    const trimmedName = assistantFormName.trim();
+    if (!trimmedName) return;
+    try {
+      setAssistantConfigSaving(true);
+      const res = await fetch(
+        `/api/assistants/${activeAssistantId}/config`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            assistant: {
+              name: trimmedName,
+              description: assistantFormDescription,
+            },
+          }),
+        }
+      );
+      if (!res.ok) {
+        console.error("Failed to update assistant:", await res.text());
+        return;
+      }
+      setAssistantConfig((prev) =>
+        prev
+          ? {
+              ...prev,
+              assistant: {
+                ...prev.assistant,
+                name: trimmedName,
+                description: assistantFormDescription || null,
+              },
+            }
+          : prev
+      );
+      setAssistants((prev) =>
+        prev.map((a) =>
+          a.id === activeAssistantId ? { ...a, name: trimmedName } : a
+        )
+      );
+    } catch (err) {
+      console.error("Failed to update assistant:", err);
+    } finally {
+      setAssistantConfigSaving(false);
+    }
   }
 
   async function handleSendText() {
@@ -962,6 +1287,7 @@ export default function ChatClientPage({
     };
   }, [showDebug, debugConfig]);
 
+
   useEffect(() => {
     scrollToBottom();
     const chatEl = chatRef.current;
@@ -1343,6 +1669,7 @@ export default function ChatClientPage({
             assistants={assistants}
             activeAssistantId={activeAssistantId}
             onChangeAssistant={(id) => setActiveAssistantId(id)}
+            assistantSelectorDisabled={viewMode === "assistant-config"}
             t={t}
           />
 
@@ -1364,21 +1691,21 @@ export default function ChatClientPage({
             </>
           )}
 
-          {loggedIn && showMenu && (activeConversationId || isAdminUser) && (
-            <>
-              <div
-                className="fixed inset-0 z-20"
-                onClick={() => setShowMenu(false)}
-                aria-hidden
-              />
-              <div
-                className={`absolute right-4 top-14 z-30 w-48 rounded-xl border shadow-lg backdrop-blur-sm ${
+            {loggedIn && showMenu && (
+              <>
+                <div
+                  className="fixed inset-0 z-20"
+                  onClick={() => setShowMenu(false)}
+                  aria-hidden
+                />
+                <div
+                  className={`absolute right-4 top-14 z-40 w-48 rounded-xl border shadow-lg backdrop-blur-sm ${
                   isDark
                     ? "border-white/10 bg-neutral-800/95"
                     : "border-zinc-200 bg-white"
                 }`}
               >
-                {activeConversationId && (
+                {viewMode === "chat" && activeConversationId && (
                   <>
                     <div className="px-1 pt-1">
                       <button
@@ -1424,8 +1751,34 @@ export default function ChatClientPage({
                     )}
                   </>
                 )}
-                {isAdminUser && (
-                  <div className="px-1 pb-1">
+                <div className="px-1 pb-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (viewMode === "assistant-config") {
+                        setViewMode("chat");
+                      } else {
+                        const targetAssistantId =
+                          activeAssistantId || assistants[0]?.id || "";
+                        if (!targetAssistantId) return;
+                        setViewMode("assistant-config");
+                      }
+                      setShowMenu(false);
+                    }}
+                    className={`mb-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-[15px] cursor-pointer ${
+                      isDark
+                        ? "text-slate-100 hover:bg-white/10"
+                        : "text-slate-800 hover:bg-zinc-50"
+                    }`}
+                  >
+                    <Wand2 className="h-3.5 w-3.5 text-sky-300" />
+                    <span className="flex-1 text-left">
+                      {viewMode === "assistant-config"
+                        ? "Back to chat"
+                        : "Configure assistant"}
+                    </span>
+                  </button>
+                  {isAdminUser && (
                     <button
                       type="button"
                       onClick={() => {
@@ -1443,14 +1796,14 @@ export default function ChatClientPage({
                         {t("chat.menu.debug")} {showDebug ? "(on)" : "(off)"}
                       </span>
                     </button>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
             </>
           )}
 
           <div className="flex flex-1 flex-col min-h-0 px-4 pb-6 sm:px-6 md:px-10 relative">
-            {callActive && (
+            {callActive && viewMode === "chat" && (
               <div className="pointer-events-none hidden md:flex absolute inset-x-0 top-2 z-20 justify-center">
                 <div
                   className={`pointer-events-auto inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-medium tracking-[0.16em] ${
@@ -1811,8 +2164,9 @@ export default function ChatClientPage({
                       >
                         Scope: {currentScope || "n/a"}
                       </span>
-                    </div>
-                  </div>
+            </div>
+          </div>
+
                   <button
                     type="button"
                     onClick={(e) => {
@@ -1921,6 +2275,104 @@ export default function ChatClientPage({
                                   ? debugConfig.sanitize.length
                                   : 0}
                               </p>
+                              <div className="mt-2 border-t border-white/10 pt-2">
+                                <p
+                                  className={`mb-1 text-[11px] font-semibold ${
+                                    isDark ? "text-sky-300" : "text-sky-700"
+                                  }`}
+                                >
+                                  Assistant config (
+                                  {assistantConfigLoading
+                                    ? "loading…"
+                                    : assistantConfigError
+                                    ? "error"
+                                    : assistantConfig
+                                    ? assistantConfig.assistant.name
+                                    : "n/a"}
+                                  )
+                                </p>
+                                {assistantConfigError && (
+                                  <p className="text-[11px] text-rose-400">
+                                    {assistantConfigError}
+                                  </p>
+                                )}
+                                {!assistantConfigLoading &&
+                                  !assistantConfigError &&
+                                  assistantConfig && (
+                                    <div className="space-y-1">
+                                      <p
+                                        className={`text-[11px] ${
+                                          isDark
+                                            ? "text-slate-200"
+                                            : "text-slate-700"
+                                        }`}
+                                      >
+                                        <span
+                                          className={`font-semibold ${
+                                            isDark
+                                              ? "text-sky-300"
+                                              : "text-sky-700"
+                                          }`}
+                                        >
+                                          Instructions enabled:
+                                        </span>{" "}
+                                        {
+                                          assistantConfig.instructions.filter(
+                                            (i) => i.enabled
+                                          ).length
+                                        }
+                                        /
+                                        {assistantConfig.instructions.length}
+                                      </p>
+                                      <p
+                                        className={`text-[11px] ${
+                                          isDark
+                                            ? "text-slate-200"
+                                            : "text-slate-700"
+                                        }`}
+                                      >
+                                        <span
+                                          className={`font-semibold ${
+                                            isDark
+                                              ? "text-sky-300"
+                                              : "text-sky-700"
+                                          }`}
+                                        >
+                                          Tools enabled:
+                                        </span>{" "}
+                                        {
+                                          assistantConfig.tools.filter(
+                                            (t) => t.enabled
+                                          ).length
+                                        }
+                                        /{assistantConfig.tools.length}
+                                      </p>
+                                      <p
+                                        className={`text-[11px] ${
+                                          isDark
+                                            ? "text-slate-200"
+                                            : "text-slate-700"
+                                        }`}
+                                      >
+                                        <span
+                                          className={`font-semibold ${
+                                            isDark
+                                              ? "text-sky-300"
+                                              : "text-sky-700"
+                                          }`}
+                                        >
+                                          Sanitization rules enabled:
+                                        </span>{" "}
+                                        {
+                                          assistantConfig.sanitize.filter(
+                                            (r) => r.enabled
+                                          ).length
+                                        }
+                                        /{assistantConfig.sanitize.length}
+                                      </p>
+                                    </div>
+                                  )}
+                              </div>
                             </div>
                           )}
                         </div>
@@ -2293,6 +2745,222 @@ export default function ChatClientPage({
                 </div>
               </div>
             )}
+
+            {viewMode === "assistant-config" && (
+              <div
+                className={`absolute inset-0 z-20 overflow-y-auto px-1 pt-6 pb-10 sm:px-2 md:px-4 ${
+                  isDark
+                    ? "bg-neutral-800 text-slate-100"
+                    : "bg-white text-slate-900"
+                }`}
+              >
+                <div className="mx-auto flex w-full max-w-3xl flex-col gap-5">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex flex-col gap-1">
+                      <h1 className="text-lg font-semibold tracking-tight">
+                        Configure assistant
+                      </h1>
+                      {assistantConfig?.assistant?.description && (
+                        <p className="text-xs text-slate-400">
+                          {assistantConfig.assistant.description}
+                        </p>
+                      )}
+                    </div>
+                    {(assistantConfigLoading || assistantConfigSaving) && (
+                      <div
+                        className={`rounded-full border px-3 py-1 text-[11px] ${
+                          isDark
+                            ? "border-slate-700 bg-neutral-900/90 text-slate-200"
+                            : "border-zinc-200 bg-white text-slate-700"
+                        }`}
+                      >
+                        {assistantConfigLoading ? "Loading…" : "Saving…"}
+                      </div>
+                    )}
+                  </div>
+
+                  {assistantConfigError && (
+                    <div className="rounded-xl border border-red-500/50 bg-red-950/40 px-4 py-3 text-xs text-red-100">
+                      {assistantConfigError}
+                    </div>
+                  )}
+
+                  {!assistantConfigLoading &&
+                    !assistantConfigError &&
+                    assistantConfig && (
+                      <>
+                        <section className="space-y-1">
+                          <label className="block text-xs font-medium text-slate-300">
+                            Name
+                          </label>
+                          <input
+                            type="text"
+                            readOnly
+                            value={assistantConfig.assistant.name}
+                        className={`w-full rounded-xl border px-3 py-2 text-sm outline-none ${
+                              isDark
+                                ? "border-white/10 bg-neutral-900 text-slate-100 placeholder:text-slate-500"
+                                : "border-zinc-300 bg-white text-slate-900 placeholder:text-slate-400"
+                            }`}
+                            placeholder="Name your assistant"
+                            onChange={(e) =>
+                              setAssistantFormName(e.target.value)
+                            }
+                          />
+                        </section>
+
+                        <section className="space-y-1">
+                          <label className="block text-xs font-medium text-slate-300">
+                            Description
+                          </label>
+                          <textarea
+                            value={assistantFormDescription}
+                            className={`min-h-[72px] w-full resize-none rounded-xl border px-3 py-2 text-sm outline-none ${
+                              isDark
+                                ? "border-white/10 bg-neutral-900 text-slate-100 placeholder:text-slate-500"
+                                : "border-zinc-300 bg-white text-slate-900 placeholder:text-slate-400"
+                            }`}
+                            placeholder="Add a short description about what this assistant does"
+                            onChange={(e) =>
+                              setAssistantFormDescription(e.target.value)
+                            }
+                          />
+                        </section>
+
+                        <div className="flex justify-end">
+                          <button
+                            type="button"
+                            onClick={saveAssistantBasics}
+                            disabled={
+                              assistantConfigSaving ||
+                              !assistantFormName.trim()
+                            }
+                            className={`mt-1 inline-flex items-center rounded-full px-4 py-1.5 text-xs font-medium ${
+                              assistantConfigSaving || !assistantFormName.trim()
+                                ? "cursor-not-allowed opacity-60"
+                                : ""
+                            } ${
+                              isDark
+                                ? "bg-slate-100 text-slate-900 hover:bg-white"
+                                : "bg-slate-900 text-white hover:bg-slate-800"
+                            }`}
+                          >
+                            Update assistant
+                          </button>
+                        </div>
+
+                        <section className="space-y-1">
+                          <label className="block text-xs font-medium text-slate-300">
+                            Instructions
+                          </label>
+                          <div
+                            className={`flex items-center justify-between gap-3 rounded-xl border px-3 py-2 ${
+                              isDark
+                                ? "border-white/10 bg-neutral-900"
+                                : "border-zinc-300 bg-white"
+                            }`}
+                          >
+                            <div className="flex flex-col text-xs text-slate-400">
+                              <span>
+                                Blocks enabled:{" "}
+                                {
+                                  assistantConfig.instructions.filter(
+                                    (i) => i.enabled
+                                  ).length
+                                }
+                                /{assistantConfig.instructions.length}
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setShowInstructionsModal(true)}
+                              className={`rounded-lg px-3 py-1 text-xs font-medium ${
+                                isDark
+                                  ? "bg-slate-100 text-slate-900 hover:bg-white"
+                                  : "bg-slate-900 text-white hover:bg-slate-800"
+                              }`}
+                            >
+                              Manage
+                            </button>
+                          </div>
+                        </section>
+
+                        <section className="space-y-1">
+                          <label className="block text-xs font-medium text-slate-300">
+                            Tools
+                          </label>
+                          <div
+                            className={`flex items-center justify-between gap-3 rounded-xl border px-3 py-2 ${
+                              isDark
+                                ? "border-white/10 bg-neutral-900"
+                                : "border-zinc-300 bg-white"
+                            }`}
+                          >
+                            <div className="flex flex-col text-xs text-slate-400">
+                              <span>
+                                Tools enabled:{" "}
+                                {
+                                  assistantConfig.tools.filter(
+                                    (t) => t.enabled
+                                  ).length
+                                }
+                                /{assistantConfig.tools.length}
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setShowToolsModal(true)}
+                              className={`rounded-lg px-3 py-1 text-xs font-medium ${
+                                isDark
+                                  ? "bg-slate-100 text-slate-900 hover:bg-white"
+                                  : "bg-slate-900 text-white hover:bg-slate-800"
+                              }`}
+                            >
+                              Manage
+                            </button>
+                          </div>
+                        </section>
+
+                        <section className="space-y-1">
+                          <label className="block text-xs font-medium text-slate-300">
+                            Sanitization rules
+                          </label>
+                          <div
+                            className={`flex items-center justify-between gap-3 rounded-xl border px-3 py-2 ${
+                              isDark
+                                ? "border-white/10 bg-neutral-900"
+                                : "border-zinc-300 bg-white"
+                            }`}
+                          >
+                            <div className="flex flex-col text-xs text-slate-400">
+                              <span>
+                                Rules enabled:{" "}
+                                {
+                                  assistantConfig.sanitize.filter(
+                                    (r) => r.enabled
+                                  ).length
+                                }
+                                /{assistantConfig.sanitize.length}
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setShowRulesModal(true)}
+                              className={`rounded-lg px-3 py-1 text-xs font-medium ${
+                                isDark
+                                  ? "bg-slate-100 text-slate-900 hover:bg-white"
+                                  : "bg-slate-900 text-white hover:bg-slate-800"
+                              }`}
+                            >
+                              Manage
+                            </button>
+                          </div>
+                        </section>
+                      </>
+                    )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -2309,6 +2977,590 @@ export default function ChatClientPage({
           setShowLoginDialog(false);
         }}
       />
+
+      {viewMode === "assistant-config" && assistantConfig && (
+        <>
+          {showInstructionsModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+              <div
+                className={`w-full max-w-lg rounded-2xl border px-4 py-3 text-xs shadow-lg ${
+                  isDark
+                    ? "border-white/10 bg-neutral-900 text-slate-100"
+                    : "border-zinc-200 bg-white text-slate-900"
+                }`}
+              >
+                <div className="mb-2 flex items-center justify-between">
+                  <h2 className="text-sm font-semibold">Instructions</h2>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingInstructionId(null);
+                        setInstructionEditorType("");
+                        setInstructionEditorLabel("");
+                        setInstructionEditorText("");
+                        setShowInstructionEditor(true);
+                      }}
+                      className={`rounded-full px-3 py-1 text-[11px] font-medium ${
+                        isDark
+                          ? "bg-slate-100 text-slate-900 hover:bg-white"
+                          : "bg-slate-900 text-white hover:bg-slate-800"
+                      }`}
+                    >
+                      New block
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowInstructionsModal(false)}
+                      className={`flex h-6 w-6 items-center justify-center rounded-full ${
+                        isDark
+                          ? "bg-neutral-800 text-slate-300 hover:bg-neutral-700"
+                          : "bg-zinc-200 text-slate-700 hover:bg-zinc-300"
+                      }`}
+                      aria-label="Close"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                </div>
+                <p className="mb-2 text-[11px] text-slate-400">
+                  Drag to reorder. Toggle blocks on/off or edit their content.
+                </p>
+                <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
+                  {assistantConfig.instructions.map((inst) => (
+                    <div
+                      key={inst.id}
+                      draggable={assistantConfig.instructions.length > 1}
+                      onDragStart={(e) => {
+                        setDragInstructionId(inst.id);
+                        e.dataTransfer.effectAllowed = "move";
+                      }}
+                      onDragOver={(e) => {
+                        if (!dragInstructionId) return;
+                        e.preventDefault();
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        if (!dragInstructionId || dragInstructionId === inst.id)
+                          return;
+                        if (!assistantConfig) return;
+                        const items = [...assistantConfig.instructions];
+                        const fromIndex = items.findIndex(
+                          (i) => i.id === dragInstructionId
+                        );
+                        const toIndex = items.findIndex(
+                          (i) => i.id === inst.id
+                        );
+                        if (fromIndex === -1 || toIndex === -1) return;
+                        const [moved] = items.splice(fromIndex, 1);
+                        items.splice(toIndex, 0, moved);
+                        const updates = items.map((item, idx) => ({
+                          id: item.id,
+                          enabled: item.enabled,
+                          sortOrder: idx,
+                        }));
+                        setAssistantConfig((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                instructions: items.map((item, idx) => ({
+                                  ...item,
+                                  sortOrder: idx,
+                                })),
+                              }
+                            : prev
+                        );
+                        void updateAssistantInstructions(updates);
+                        setDragInstructionId(null);
+                      }}
+                      className={`flex items-start gap-2 rounded-xl border px-3 py-2 text-xs ${
+                        isDark
+                          ? "border-white/10 bg-neutral-900 hover:border-sky-500/40"
+                          : "border-zinc-200 bg-white hover:border-sky-500/60"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        className="mt-0.5 h-3.5 w-3.5 rounded border-slate-600 bg-slate-900 text-sky-500 focus:ring-sky-500"
+                        checked={inst.enabled}
+                        onChange={() =>
+                          updateAssistantInstructions([
+                            {
+                              id: inst.id,
+                              enabled: !inst.enabled,
+                              sortOrder: inst.sortOrder,
+                            },
+                          ])
+                        }
+                      />
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex flex-col">
+                            <span className="font-medium text-slate-100">
+                              {inst.label || inst.type}
+                            </span>
+                            {inst.lines && inst.lines.length > 0 && (
+                              <p className="mt-1 line-clamp-2 text-[11px] text-slate-400">
+                                {inst.lines[0]}
+                              </p>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] uppercase tracking-wide text-slate-300">
+                              {inst.type}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingInstructionId(inst.id);
+                                setInstructionEditorType(inst.type);
+                                setInstructionEditorLabel(inst.label ?? "");
+                                setInstructionEditorText(
+                                  Array.isArray(inst.lines)
+                                    ? inst.lines.join("\n")
+                                    : ""
+                                );
+                                setShowInstructionEditor(true);
+                              }}
+                              className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                                isDark
+                                  ? "bg-slate-100 text-slate-900 hover:bg-white"
+                                  : "bg-slate-900 text-white hover:bg-slate-800"
+                              }`}
+                            >
+                              Edit
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  {assistantConfig.instructions.length === 0 && (
+                    <p className="text-[11px] text-slate-500">
+                      No instructions available.
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {showToolsModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+              <div
+                className={`w-full max-w-lg rounded-2xl border px-4 py-3 text-xs shadow-lg ${
+                  isDark
+                    ? "border-white/10 bg-neutral-900 text-slate-100"
+                    : "border-zinc-200 bg-white text-slate-900"
+                }`}
+              >
+                <div className="mb-2 flex items-center justify-between">
+                  <h2 className="text-sm font-semibold">Tools</h2>
+                  <button
+                    type="button"
+                    onClick={() => setShowToolsModal(false)}
+                    className={`flex h-6 w-6 items-center justify-center rounded-full ${
+                      isDark
+                        ? "bg-neutral-800 text-slate-300 hover:bg-neutral-700"
+                        : "bg-zinc-200 text-slate-700 hover:bg-zinc-300"
+                    }`}
+                    aria-label="Close"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+                <p className="mb-2 text-[11px] text-slate-400">
+                  Choose which tools the assistant can call.
+                </p>
+                <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
+                  {assistantConfig.tools.map((tool) => (
+                    <label
+                      key={tool.id}
+                      className={`flex cursor-pointer items-start gap-2 rounded-xl border px-3 py-2 text-xs ${
+                        isDark
+                          ? "border-white/10 bg-neutral-900 hover:border-sky-500/40"
+                          : "border-zinc-200 bg-white hover:border-sky-500/60"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        className="mt-0.5 h-3.5 w-3.5 rounded border-slate-600 bg-slate-900 text-sky-500 focus:ring-sky-500"
+                        checked={tool.enabled}
+                        onChange={() =>
+                          updateAssistantTools([
+                            { id: tool.id, enabled: !tool.enabled },
+                          ])
+                        }
+                      />
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-medium text-slate-100">
+                            {tool.name}
+                          </span>
+                          {tool.kind && (
+                            <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] uppercase tracking-wide text-slate-300">
+                              {tool.kind}
+                            </span>
+                          )}
+                        </div>
+                        {tool.description && (
+                          <p className="mt-1 line-clamp-2 text-[11px] text-slate-400">
+                            {tool.description}
+                          </p>
+                        )}
+                      </div>
+                    </label>
+                  ))}
+                  {assistantConfig.tools.length === 0 && (
+                    <p className="text-[11px] text-slate-500">
+                      No tools available.
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {showRulesModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+              <div
+                className={`w-full max-w-lg rounded-2xl border px-4 py-3 text-xs shadow-lg ${
+                  isDark
+                    ? "border-white/10 bg-neutral-900 text-slate-100"
+                    : "border-zinc-200 bg-white text-slate-900"
+                }`}
+              >
+                <div className="mb-2 flex items-center justify-between">
+                  <h2 className="text-sm font-semibold">
+                    Sanitization rules
+                  </h2>
+                  <button
+                    type="button"
+                    onClick={() => setShowRulesModal(false)}
+                    className={`flex h-6 w-6 items-center justify-center rounded-full ${
+                      isDark
+                        ? "bg-neutral-800 text-slate-300 hover:bg-neutral-700"
+                        : "bg-zinc-200 text-slate-700 hover:bg-zinc-300"
+                    }`}
+                    aria-label="Close"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+                <p className="mb-2 text-[11px] text-slate-400">
+                  Enable redact/replace rules to apply to assistant responses.
+                </p>
+                <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
+                  {assistantConfig.sanitize.map((rule) => (
+                    <label
+                      key={rule.id}
+                      className={`flex cursor-pointer items-start gap-2 rounded-xl border px-3 py-2 text-xs ${
+                        isDark
+                          ? "border-white/10 bg-neutral-900 hover:border-sky-500/40"
+                          : "border-zinc-200 bg-white hover:border-sky-500/60"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        className="mt-0.5 h-3.5 w-3.5 rounded border-slate-600 bg-slate-900 text-sky-500 focus:ring-sky-500"
+                        checked={rule.enabled}
+                        onChange={() =>
+                          updateAssistantSanitize([
+                            { id: rule.id, enabled: !rule.enabled },
+                          ])
+                        }
+                      />
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-medium text-slate-100">
+                            {rule.description || "Rule"}
+                          </span>
+                          <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] uppercase tracking-wide text-slate-300">
+                            {rule.direction}
+                          </span>
+                        </div>
+                      </div>
+                    </label>
+                  ))}
+                  {assistantConfig.sanitize.length === 0 && (
+                    <p className="text-[11px] text-slate-500">
+                      No sanitization rules available.
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {showInstructionEditor && (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+              <div
+                className={`flex h-[80vh] w-[90vw] max-w-4xl flex-col rounded-2xl border px-5 py-4 text-xs shadow-2xl ${
+                  isDark
+                    ? "border-slate-600 bg-neutral-900 text-slate-100"
+                    : "border-zinc-300 bg-white text-slate-900"
+                }`}
+              >
+                <div className="mb-3 flex items-center justify-between">
+                  <div className="flex flex-col gap-1">
+                    <h2 className="text-sm font-semibold">
+                      {editingInstructionId
+                        ? "Edit instruction block"
+                        : "New instruction block"}
+                    </h2>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <input
+                        type="text"
+                        placeholder="Type (e.g. identity, tone_guideline)"
+                        value={instructionEditorType}
+                        onChange={(e) =>
+                          setInstructionEditorType(e.target.value)
+                        }
+                        className={`w-56 rounded-lg border px-2 py-1 text-[11px] outline-none ${
+                          isDark
+                            ? "border-white/10 bg-neutral-800 text-slate-100 placeholder:text-slate-500"
+                            : "border-zinc-300 bg-white text-slate-900 placeholder:text-slate-400"
+                        }`}
+                      />
+                      <input
+                        type="text"
+                        placeholder="Label (optional)"
+                        value={instructionEditorLabel}
+                        onChange={(e) =>
+                          setInstructionEditorLabel(e.target.value)
+                        }
+                        className={`min-w-[200px] flex-1 rounded-lg border px-2 py-1 text-[11px] outline-none ${
+                          isDark
+                            ? "border-white/10 bg-neutral-800 text-slate-100 placeholder:text-slate-500"
+                            : "border-zinc-300 bg-white text-slate-900 placeholder:text-slate-400"
+                        }`}
+                      />
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (instructionEditorSaving) return;
+                      setShowInstructionEditor(false);
+                    }}
+                    className={`flex h-7 w-7 items-center justify-center rounded-full ${
+                      isDark
+                        ? "bg-neutral-800 text-slate-300 hover:bg-neutral-700"
+                        : "bg-zinc-200 text-slate-700 hover:bg-zinc-300"
+                    }`}
+                    aria-label="Close"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+                <div className="flex-1 overflow-hidden rounded-2xl border border-sky-500/60 bg-slate-900">
+                  <div className="flex h-full">
+                    <div
+                      ref={instructionEditorGutterRef}
+                      className="w-10 shrink-0 overflow-y-auto border-r border-slate-700 bg-slate-900/80 py-2 pr-2 text-right font-mono text-sm text-slate-500 select-none"
+                    >
+                      {instructionEditorLines.map((_, idx) => {
+                        const rows =
+                          instructionEditorRowsPerLine[idx] && instructionEditorLineHeight
+                            ? instructionEditorRowsPerLine[idx]
+                            : 1;
+                        const height =
+                          instructionEditorLineHeight && rows
+                            ? instructionEditorLineHeight * rows
+                            : undefined;
+                        return (
+                          <div
+                            key={idx}
+                            className="flex items-start justify-end pr-0.5 text-[11px]"
+                            style={height ? { height } : undefined}
+                          >
+                            {idx + 1}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <textarea
+                      ref={instructionEditorTextareaRef}
+                      value={instructionEditorText}
+                      onChange={(e) =>
+                        setInstructionEditorText(e.target.value)
+                      }
+                      onScroll={(e) => {
+                        const gutter = instructionEditorGutterRef.current;
+                        if (gutter) {
+                          gutter.scrollTop = (
+                            e.target as HTMLTextAreaElement
+                          ).scrollTop;
+                        }
+                      }}
+                      className="h-full w-full flex-1 resize-none overflow-auto bg-transparent px-3 py-2 font-mono text-sm leading-5 text-slate-50 outline-none whitespace-pre-wrap"
+                      spellCheck={false}
+                    />
+                  </div>
+                </div>
+                <div className="mt-2 flex items-center justify-between">
+                  <p className="text-[11px] text-slate-400">
+                    {instructionEditorLines.filter((l) => l.trim()).length}{" "}
+                    line
+                    {instructionEditorLines.filter((l) => l.trim()).length === 1
+                      ? ""
+                      : "s"}{" "}
+                    in this block. Conversations with your assistant can
+                    potentially include part or all of the instructions
+                    provided.
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (instructionEditorSaving) return;
+                        setShowInstructionEditor(false);
+                      }}
+                      className={`rounded-full px-3 py-1 text-[11px] font-medium ${
+                        isDark
+                          ? "bg-neutral-800 text-slate-200 hover:bg-neutral-700"
+                          : "bg-zinc-200 text-slate-800 hover:bg-zinc-300"
+                      }`}
+                    >
+                      Close
+                    </button>
+                    <button
+                      type="button"
+                      disabled={instructionEditorSaving}
+                      onClick={async () => {
+                        const trimmedType = instructionEditorType.trim();
+                        const lines = instructionEditorText
+                          .split("\n")
+                          .map((l) => l.trim())
+                          .filter((l) => l.length > 0);
+                        if (!trimmedType || lines.length === 0) {
+                          return;
+                        }
+                        try {
+                          setInstructionEditorSaving(true);
+                          if (editingInstructionId) {
+                            const res = await fetch(
+                              `/api/instructions/${editingInstructionId}`,
+                              {
+                                method: "PATCH",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({
+                                  type: trimmedType,
+                                  label:
+                                    instructionEditorLabel.trim() || null,
+                                  lines,
+                                }),
+                              }
+                            );
+                            if (!res.ok) {
+                              console.error(
+                                "Failed to update instruction:",
+                                await res.text()
+                              );
+                            } else {
+                              setAssistantConfig((prev) =>
+                                prev
+                                  ? {
+                                      ...prev,
+                                      instructions: prev.instructions.map(
+                                        (inst) =>
+                                          inst.id === editingInstructionId
+                                            ? {
+                                                ...inst,
+                                                type: trimmedType,
+                                                label:
+                                                  instructionEditorLabel.trim() ||
+                                                  null,
+                                                lines,
+                                              }
+                                            : inst
+                                      ),
+                                    }
+                                  : prev
+                              );
+                            }
+                          } else if (activeAssistantId) {
+                            const res = await fetch("/api/instructions", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                type: trimmedType,
+                                label:
+                                  instructionEditorLabel.trim() || null,
+                                lines,
+                              }),
+                            });
+                            if (!res.ok) {
+                              console.error(
+                                "Failed to create instruction:",
+                                await res.text()
+                              );
+                            } else {
+                              const data = await res.json();
+                              const created = data.instruction as {
+                                id: string;
+                                type: string;
+                                label: string | null;
+                                lines: string[];
+                                status: string;
+                              };
+                              setAssistantConfig((prev) => {
+                                if (!prev) return prev;
+                                const nextSort =
+                                  prev.instructions.length > 0
+                                    ? prev.instructions.length
+                                    : 0;
+                                const nextInstructions = [
+                                  ...prev.instructions,
+                                  {
+                                    id: created.id,
+                                    type: created.type,
+                                    label: created.label,
+                                    lines: created.lines,
+                                    enabled: true,
+                                    sortOrder: nextSort,
+                                  },
+                                ];
+                                void updateAssistantInstructions([
+                                  {
+                                    id: created.id,
+                                    enabled: true,
+                                    sortOrder: nextSort,
+                                  },
+                                ]);
+                                return {
+                                  ...prev,
+                                  instructions: nextInstructions,
+                                };
+                              });
+                            }
+                          }
+                          setShowInstructionEditor(false);
+                        } catch (err) {
+                          console.error("Instruction editor error:", err);
+                        } finally {
+                          setInstructionEditorSaving(false);
+                        }
+                      }}
+                      className={`rounded-full px-4 py-1.5 text-[11px] font-medium ${
+                        instructionEditorSaving
+                          ? "cursor-not-allowed opacity-60"
+                          : ""
+                      } ${
+                        isDark
+                          ? "bg-sky-500 text-white hover:bg-sky-400"
+                          : "bg-sky-600 text-white hover:bg-sky-500"
+                      }`}
+                    >
+                      {editingInstructionId ? "Save changes" : "Create block"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </>
+      )}
     </main>
   );
 }
