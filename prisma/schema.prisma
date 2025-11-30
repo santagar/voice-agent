@@ -74,9 +74,9 @@ model User {
   conversations Conversation[]       @relation("ConversationUser")
   authAccounts AuthAccount[]         @relation("UserAuthAccounts")
 
-  profileTemplates   ProfileTemplate[]   @relation("ProfileTemplateOwner")
-  sanitizerTemplates SanitizerTemplate[] @relation("SanitizerTemplateOwner")
-  toolTemplates      ToolTemplate[]      @relation("ToolTemplateOwner")
+  tools             Tool[]             @relation("ToolOwner")
+  instructions      Instruction[]      @relation("InstructionOwner")
+  sanitizationRules SanitizationRule[] @relation("SanitizationRuleOwner")
 
   @@map("users")
 }
@@ -109,7 +109,6 @@ model Workspace {
 
   members       WorkspaceMember[]
   assistants    Assistant[]
-  conversations Conversation[]
 
   @@map("workspaces")
 }
@@ -130,109 +129,125 @@ model WorkspaceMember {
   @@map("workspace_members")
 }
 
-/// Global profile blocks (persona / identity) that can be reused across assistants.
-model ProfileTemplate {
-  id          String   @id @default(uuid())
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt      @map("updated_at")
-  name        String
-  description String?
-  status      AssistantStatus @default(active)
-  profileJson Json    @map("profile_json")
-
-  ownerId String? @map("owner_id")
-  owner   User?  @relation("ProfileTemplateOwner", fields: [ownerId], references: [id])
-
-  assistantBindings AssistantTemplateProfile[]
-
-  @@map("profile_templates")
-}
-
-/// Global sanitize rule sets that can be reused across assistants.
-model SanitizerTemplate {
-  id          String   @id @default(uuid())
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt      @map("updated_at")
-  name        String
-  description String?
-  status      AssistantStatus @default(active)
-  sanitizeJson Json   @map("sanitize_json")
-
-  ownerId String? @map("owner_id")
-  owner   User?  @relation("SanitizerTemplateOwner", fields: [ownerId], references: [id])
-
-  assistantBindings AssistantTemplateSanitizer[]
-
-  @@map("sanitizer_templates")
-}
-
-/// Global templates for tools (business / session / system)
-model ToolTemplate {
+/// Generic tool definition aligned with Realtime API tools.
+/// - `type` matches Realtime tool type: "function", "code_interpreter", "file_search", etc.
+/// - `kind` is app-specific routing: "business", "session", "system", etc.
+/// - `definitionJson` stores the raw tool spec/config (e.g. function parameters, options).
+model Tool {
   id            String   @id @default(uuid())
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt      @map("updated_at")
-  name          String
+
+  name          String   @unique
+  type          String   @default("function")
   kind          String   @default("business")
+  description   String?
   definitionJson Json    @map("definition_json")
-  status        AssistantStatus @default(active)
+  status        String   @default("active")
 
   ownerId String? @map("owner_id")
-  owner   User?  @relation("ToolTemplateOwner", fields: [ownerId], references: [id])
+  owner   User?   @relation("ToolOwner", fields: [ownerId], references: [id])
 
-  assistantTemplateTools AssistantTemplateTool[]
+  assistantBindings AssistantTool[]
+  toolCalls         ToolCall[]
 
-  @@map("tool_templates")
+  @@map("tools")
 }
 
-/// Global templates for assistant configuration (identity, tone, rules, tools, etc.)
-model AssistantTemplate {
+/// Join assistant ↔ tool for assigning multiple tools to each assistant.
+model AssistantTool {
+  id          String   @id @default(uuid())
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt      @map("updated_at")
+  assistantId String   @map("assistant_id")
+  toolId      String   @map("tool_id")
+  enabled     Boolean  @default(true)
+
+  assistant Assistant @relation(fields: [assistantId], references: [id], onDelete: Cascade)
+  tool      Tool      @relation(fields: [toolId], references: [id], onDelete: Cascade)
+
+  @@unique([assistantId, toolId], map: "assistant_tool_unique")
+  @@map("assistant_tools")
+}
+
+/// Generic instruction block used to build Realtime `session.instructions`.
+/// - `type` represents the logical block: "identity", "tone_guideline", etc.
+/// - `lines` stores the list of textual instructions for that block.
+///   NOTE: when moving to Postgres this can become `String[]` instead of `Json`.
+model Instruction {
   id        String   @id @default(uuid())
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt      @map("updated_at")
-  name      String
+
+  type   String   @unique
+  label  String?
+  lines  Json     @map("lines_json")
+  status String   @default("active")
+
+  ownerId String? @map("owner_id")
+  owner   User?   @relation("InstructionOwner", fields: [ownerId], references: [id])
+
+  assistantBindings AssistantInstruction[]
+
+  @@map("instructions")
+}
+
+/// Join assistant ↔ instruction for assigning multiple instruction blocks
+/// to each assistant, with per-assistant enable/disable and ordering.
+model AssistantInstruction {
+  id            String   @id @default(uuid())
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt      @map("updated_at")
+  assistantId   String   @map("assistant_id")
+  instructionId String   @map("instruction_id")
+  enabled       Boolean  @default(true)
+  sortOrder     Int      @default(0) @map("sort_order")
+
+  assistant   Assistant   @relation(fields: [assistantId], references: [id], onDelete: Cascade)
+  instruction Instruction @relation(fields: [instructionId], references: [id], onDelete: Cascade)
+
+  @@unique([assistantId, instructionId], map: "assistant_instruction_unique")
+  @@map("assistant_instructions")
+}
+
+/// Sanitization rule applied to assistant input/output text.
+/// - `direction` controls where it is applied: "in", "out" or "both".
+model SanitizationRule {
+  id          String   @id @default(uuid())
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt      @map("updated_at")
+
   description String?
-  status    AssistantStatus @default(active)
+  pattern     String
+  flags       String?  @default("g")
+  replacement String   @default("")
+  direction   String   @default("out")
+  status      String   @default("active")
 
-  // Bindings to available profile / sanitizer variants and tools.
-  profiles   AssistantTemplateProfile[]
-  sanitizers AssistantTemplateSanitizer[]
-  tools      AssistantTemplateTool[]
+  ownerId String? @map("owner_id")
+  owner   User?   @relation("SanitizationRuleOwner", fields: [ownerId], references: [id])
 
-  assistants Assistant[]
+  assistantBindings AssistantSanitizationRule[]
 
-  @@map("assistant_templates")
+  @@map("sanitization_rules")
 }
 
-/// Binding between an assistant template and a profile template (multiple, with enable flag).
-model AssistantTemplateProfile {
-  id                  String   @id @default(uuid())
-  createdAt           DateTime @default(now()) @map("created_at")
-  updatedAt           DateTime @updatedAt      @map("updated_at")
-  assistantTemplateId String   @map("assistant_template_id")
-  profileTemplateId   String   @map("profile_template_id")
-  enabled             Boolean  @default(true)
+/// Join assistant ↔ sanitization rule for assigning multiple rules
+/// to each assistant, with per-assistant enable/disable and ordering.
+model AssistantSanitizationRule {
+  id          String   @id @default(uuid())
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt      @map("updated_at")
+  assistantId String   @map("assistant_id")
+  ruleId      String   @map("rule_id")
+  enabled     Boolean  @default(true)
+  sortOrder   Int      @default(0) @map("sort_order")
 
-  assistantTemplate AssistantTemplate @relation(fields: [assistantTemplateId], references: [id], onDelete: Cascade)
-  profileTemplate   ProfileTemplate   @relation(fields: [profileTemplateId], references: [id], onDelete: Cascade)
+  assistant Assistant        @relation(fields: [assistantId], references: [id], onDelete: Cascade)
+  rule      SanitizationRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
 
-  @@unique([assistantTemplateId, profileTemplateId], map: "assistant_template_profile_unique")
-  @@map("assistant_template_profiles")
-}
-
-/// Binding between an assistant template and a sanitizer template (multiple, with enable flag).
-model AssistantTemplateSanitizer {
-  id                  String   @id @default(uuid())
-  createdAt           DateTime @default(now()) @map("created_at")
-  updatedAt           DateTime @updatedAt      @map("updated_at")
-  assistantTemplateId String   @map("assistant_template_id")
-  sanitizerTemplateId String   @map("sanitizer_template_id")
-  enabled             Boolean  @default(true)
-
-  assistantTemplate AssistantTemplate @relation(fields: [assistantTemplateId], references: [id], onDelete: Cascade)
-  sanitizerTemplate SanitizerTemplate @relation(fields: [sanitizerTemplateId], references: [id], onDelete: Cascade)
-
-  @@unique([assistantTemplateId, sanitizerTemplateId], map: "assistant_template_sanitizer_unique")
-  @@map("assistant_template_sanitizers")
+  @@unique([assistantId, ruleId], map: "assistant_sanitization_rule_unique")
+  @@map("assistant_sanitization_rules")
 }
 
 /// Assistant instance configured by a user within a workspace
@@ -246,44 +261,20 @@ model Assistant {
   slug        String   @unique
   status      AssistantStatus @default(active)
 
-  realtimeModel        String   @map("realtime_model")
-  realtimeModelPremium String?  @map("realtime_model_premium")
-  voice                String?
-  embeddingModel       String?  @map("embedding_model")
-
-  knowledgeProvider  String? @map("knowledge_provider")
-  knowledgeNamespace String? @map("knowledge_namespace")
-
   workspaceId String  @map("workspace_id")
   ownerId     String  @map("owner_id")
-  templateId  String  @map("template_id")
 
   workspace Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   owner     User             @relation("AssistantOwner", fields: [ownerId], references: [id])
-  template  AssistantTemplate @relation(fields: [templateId], references: [id])
 
   conversations   Conversation[]
   scopes          AssistantScopeDefinition[]
   knowledgeSource KnowledgeSource[]
-  toolCalls       ToolCall[]
+  tools           AssistantTool[]
+  instructions    AssistantInstruction[]
+  sanitizationRules AssistantSanitizationRule[]
 
   @@map("assistants")
-}
-
-/// Join assistant template ↔ tool template for default tools configuration.
-model AssistantTemplateTool {
-  id                  String   @id @default(uuid())
-  createdAt           DateTime @default(now()) @map("created_at")
-  updatedAt           DateTime @updatedAt      @map("updated_at")
-  assistantTemplateId String   @map("assistant_template_id")
-  toolTemplateId      String   @map("tool_template_id")
-  enabled             Boolean  @default(true)
-
-  assistantTemplate AssistantTemplate @relation(fields: [assistantTemplateId], references: [id], onDelete: Cascade)
-  toolTemplate      ToolTemplate      @relation(fields: [toolTemplateId], references: [id], onDelete: Cascade)
-
-  @@unique([assistantTemplateId, toolTemplateId], map: "assistant_template_tool_unique")
-  @@map("assistant_template_tools")
 }
 
 /// Scope definitions per assistant (support, star-wars, tech, etc.)
@@ -331,11 +322,9 @@ model Conversation {
   currentScope String?  @map("current_scope")
   status       ConversationStatus @default(active)
 
-  workspaceId String  @map("workspace_id")
   assistantId String  @map("assistant_id")
   userId      String? @map("user_id")
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   assistant Assistant @relation(fields: [assistantId], references: [id], onDelete: Cascade)
   user      User?     @relation("ConversationUser", fields: [userId], references: [id])
 
@@ -370,17 +359,16 @@ model ToolCall {
   createdAt      DateTime  @default(now()) @map("created_at")
   completedAt    DateTime? @map("completed_at")
   name           String
-  kind           String    @default("business")
   status         String    @default("started")
   inputJson      Json      @map("input_json")
   resultJson     Json?     @map("result_json")
   error          String?
 
   conversationId String   @map("conversation_id")
-  assistantId    String   @map("assistant_id")
+  toolId         String?  @map("tool_id")
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  assistant    Assistant    @relation(fields: [assistantId], references: [id], onDelete: Cascade)
+  tool         Tool?        @relation(fields: [toolId], references: [id])
   messages     Message[]
 
   @@map("tool_calls")

@@ -13,6 +13,9 @@
     "dev:all": "npm run build:realtime && concurrently \"npm run dev\" \"npm run realtime\"",
     "dev:all:js": "npm run build:realtime && concurrently \"npm run dev\" \"npm run realtime:js\"",
     "build:kb": "node scripts/build-knowledge.cjs",
+    "seed:sanitize": "node scripts/seed-sanitize.cjs",
+    "seed:instructions": "node scripts/seed-instructions.cjs",
+    "seed:tools": "node scripts/seed-tools.cjs",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev"
   },

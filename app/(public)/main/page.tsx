@@ -71,83 +71,6 @@ export default async function ChatPage() {
     });
 
     if (!assistant) {
-      const realtimeModel =
-        process.env.REALTIME_MODEL ?? "gpt-4o-mini-realtime-preview";
-      const voice = process.env.REALTIME_VOICE ?? "verse";
-      const embeddingModel =
-        process.env.EMBEDDING_MODEL ?? "text-embedding-3-small";
-
-      // Find or create a default assistant template as the single
-      // source of truth for profile, sanitize rules and tools.
-      let template = await prisma.assistantTemplate.findFirst({
-        where: {
-          name: "Default voice assistant",
-          status: "active",
-        },
-      });
-
-      if (!template) {
-        // Load current JSON config snapshots from the config/ folder
-        // and store them in reusable templates.
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const profileJson = require("@/config/profile.json");
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const sanitizeJson = require("@/config/sanitize.json");
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const toolsJson = require("@/config/tools.json");
-
-        const profileTemplate = await prisma.profileTemplate.create({
-          data: {
-            name: "Default voice assistant profile",
-            description: "Default persona and tone configuration.",
-            status: "active",
-            profileJson,
-          },
-        });
-
-        const sanitizerTemplate = await prisma.sanitizerTemplate.create({
-          data: {
-            name: "Default sanitization rules",
-            description: "Default redaction rules for sensitive data.",
-            status: "active",
-            sanitizeJson,
-          },
-        });
-
-        // Tools JSON is loaded for future use; wiring ToolTemplate +
-        // AssistantTemplateTool can be added when needed.
-        void toolsJson;
-
-        template = await prisma.assistantTemplate.create({
-          data: {
-            name: "Default voice assistant",
-            description:
-              "Default realtime assistant persona, tools and sanitize rules.",
-            status: "active",
-            profiles: {
-              create: [
-                {
-                  profileTemplate: {
-                    connect: { id: profileTemplate.id },
-                  },
-                  enabled: true,
-                },
-              ],
-            },
-            sanitizers: {
-              create: [
-                {
-                  sanitizerTemplate: {
-                    connect: { id: sanitizerTemplate.id },
-                  },
-                  enabled: true,
-                },
-              ],
-            },
-          },
-        });
-      }
-
       assistant = await prisma.assistant.create({
         data: {
           name: "Default voice assistant",
@@ -155,14 +78,8 @@ export default async function ChatPage() {
             "Default realtime assistant for voice and chat interactions.",
           slug: `default-assistant-${workspace.id.slice(0, 8)}`,
           status: "active",
-          realtimeModel,
-          realtimeModelPremium:
-            process.env.REALTIME_MODEL_PREMIUM ?? null,
-          voice,
-          embeddingModel,
           workspaceId: workspace.id,
           ownerId: userId,
-          templateId: template.id,
         },
       });
     }

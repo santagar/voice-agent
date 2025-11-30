@@ -1,20 +1,8 @@
-import PlatformPeopleClientPage from "./Client";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth/options";
+import { redirect } from "next/navigation";
 
-export default async function PlatformPeoplePage() {
-  const session = await getServerSession(authOptions);
-
-  const userEmail = session?.user?.email ?? "user@example.com";
-  const userName = session?.user?.name ?? null;
-  const userImage = (session?.user as any)?.image ?? null;
-
-  return (
-    <PlatformPeopleClientPage
-      userEmail={userEmail}
-      userName={userName}
-      userImage={userImage}
-    />
-  );
+export default function PlatformRootPage() {
+  // For now, the main entrypoint of the backoffice redirects
+  // to the Assistants view.
+  redirect("/platform/assistants");
 }
 

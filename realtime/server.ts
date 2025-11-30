@@ -34,6 +34,7 @@ type KnowledgeVector = KnowledgeItem & {
 };
 
 type ToolDefinition = {
+  id?: string;
   name: string;
   kind?: "business" | "session";
   routes?: {
@@ -128,25 +129,22 @@ type OpenAIEvent = {
 // We resolve JSON config relative to the project root so the same
 // paths work both in TS and in the compiled JS.
 const ROOT_DIR = path.join(__dirname, "..", "..");
+// Fallback profile from JSON; when instructions exist in the DB
+// we build the session instructions string from there instead.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const profile = require(path.join(
+const defaultProfile = require(path.join(
   ROOT_DIR,
   "config",
   "profile.json"
 )) as Record<string, string[]>;
+// Fallback sanitization rules from JSON; when rules exist in the DB
+// we build the compiled regex set from there instead.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const sanitizationRules = require(path.join(
+const defaultSanitizeRules = require(path.join(
   ROOT_DIR,
   "config",
   "sanitize.json"
 )) as SanitizationRuleConfig[];
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const toolsConfig = require(path.join(
-  ROOT_DIR,
-  "config",
-  "tools.json"
-)) as { tools: ToolDefinition[] };
-const { tools } = toolsConfig;
 const knowledgeItems = loadKnowledgeItems() as KnowledgeItem[];
 
 // Pre-generated vector store (see scripts/build-knowledge.cjs)
@@ -235,26 +233,133 @@ const prisma = new PrismaClient({
     process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
 });
 
-const sessionInstructions = buildSessionInstructions(profile);
-  const compiledSanitizeRules = compileSanitizationRules(sanitizationRules);
-const toolDefinitions: ToolDefinition[] = Array.isArray(tools)
-  ? (tools as ToolDefinition[])
-  : [];
-const toolMap = new Map<string, ToolDefinition>(
-  toolDefinitions.map((tool) => [tool.name, tool])
-);
-const openAITools = toolDefinitions
-  .filter((tool) => tool?.name)
-  .map((tool) => ({
-    type: "function",
-    name: String(tool.name),
-    description: tool.description || "",
-    parameters:
-      tool.parameters || {
-        type: "object",
-        properties: {},
-      },
-  }));
+// Start with the default profile from JSON; if we find Instruction
+// rows in the database we will rebuild this string from there.
+let sessionInstructions = buildSessionInstructions(defaultProfile);
+// Start with the default sanitize rules from JSON; if we find
+// SanitizationRule rows in the database we will rebuild this set.
+let compiledSanitizeRules: CompiledSanitizationRule[] =
+  compileSanitizationRules(defaultSanitizeRules);
+
+let toolDefinitions: ToolDefinition[] = [];
+const toolMap = new Map<string, ToolDefinition>();
+let openAITools: {
+  type: "function";
+  name: string;
+  description: string;
+  parameters: NonNullable<ToolDefinition["parameters"]>;
+}[] = [];
+
+async function loadToolsFromDatabase() {
+  try {
+    const dbTools = await prisma.tool.findMany({
+      where: { status: "active" },
+      orderBy: { createdAt: "asc" },
+    });
+
+    toolDefinitions = dbTools.map((t) => {
+      const def: any = t.definitionJson || {};
+      return {
+        id: t.id,
+        name: t.name,
+        kind: (t.kind as any) === "session" ? "session" : "business",
+        routes: def.routes,
+        ui_command: def.ui_command,
+        session_update: def.session_update,
+        description: t.description || "",
+        parameters:
+          def.parameters || ({
+            type: "object",
+            properties: {},
+          } as ToolDefinition["parameters"]),
+      };
+    });
+
+    toolMap.clear();
+    for (const tool of toolDefinitions) {
+      toolMap.set(tool.name, tool);
+    }
+
+    openAITools = toolDefinitions
+      .filter((tool) => tool?.name)
+      .map((tool) => ({
+        type: "function" as const,
+        name: String(tool.name),
+        description: tool.description || "",
+        parameters:
+          tool.parameters || {
+            type: "object",
+            properties: {},
+          },
+      }));
+
+    console.log(`Loaded ${toolDefinitions.length} tools from database.`);
+  } catch (err) {
+    console.error("Failed to load tools from database:", err);
+    toolDefinitions = [];
+    toolMap.clear();
+    openAITools = [];
+  }
+}
+
+async function loadSanitizationRulesFromDatabase() {
+  try {
+    const rules = await prisma.sanitizationRule.findMany({
+      where: { status: "active", direction: { in: ["out", "both"] } },
+      orderBy: { createdAt: "asc" },
+    });
+
+    if (!rules.length) {
+      console.log(
+        "No SanitizationRule rows found; using config/sanitize.json for output sanitization."
+      );
+      return;
+    }
+
+    const rawRules: SanitizationRuleConfig[] = rules.map((rule) => ({
+      description: rule.description || undefined,
+      pattern: rule.pattern,
+      flags: rule.flags || "g",
+      replacement: rule.replacement,
+    }));
+
+    compiledSanitizeRules = compileSanitizationRules(rawRules);
+    console.log(
+      `Loaded ${compiledSanitizeRules.length} sanitization rules from database for output text.`
+    );
+  } catch (err) {
+    console.error("Failed to load sanitization rules from database:", err);
+  }
+}
+
+async function loadInstructionsFromDatabase() {
+  try {
+    const instructions = await prisma.instruction.findMany({
+      where: { status: "active" },
+      orderBy: { createdAt: "asc" },
+    });
+
+    if (!instructions.length) {
+      console.log(
+        "No Instruction rows found; using config/profile.json for session instructions."
+      );
+      return;
+    }
+
+    const profileObj: Record<string, string[]> = {};
+    for (const inst of instructions) {
+      const lines = (inst.lines as unknown) as string[] | null;
+      profileObj[inst.type] = Array.isArray(lines) ? lines : [];
+    }
+
+    sessionInstructions = buildSessionInstructions(profileObj);
+    console.log(
+      `Loaded ${instructions.length} instruction blocks from database for session instructions.`
+    );
+  } catch (err) {
+    console.error("Failed to load instructions from database:", err);
+  }
+}
 
 // Template helpers for RAG context injection.
 // We keep these server-side because the context snippets change at runtime
@@ -546,7 +651,6 @@ async function handleToolCall(
 
   let outputPayload: any = {};
   const conversationId = context?.conversationId || null;
-  const assistantId = context?.assistantId || null;
 
   let dbToolCallId: string | null = null;
 
@@ -555,15 +659,13 @@ async function handleToolCall(
     const displayName = toolMeta?.name || toolName || "unknown_tool";
 
     // Persist the ToolCall start if we can associate it with a
-    // concrete conversation + assistant. If we don't yet have
-    // that context (e.g. pure voice greeting), we still execute
-    // the tool but skip DB persistence.
-    if (conversationId && assistantId) {
+    // concrete conversation. If we don't yet have that context
+    // (e.g. pure voice greeting), we still execute the tool but
+    // skip DB persistence.
+    if (conversationId) {
       console.log(
         "Persisting ToolCall start for conversation",
         conversationId,
-        "assistant",
-        assistantId,
         "tool",
         displayName
       );
@@ -571,9 +673,8 @@ async function handleToolCall(
         const created = await prisma.toolCall.create({
           data: {
             conversationId,
-            assistantId,
+            toolId: toolMeta?.id,
             name: displayName,
-            kind: toolMeta?.kind || "business",
             status: "started",
             inputJson: args,
           },
@@ -973,12 +1074,17 @@ function simulateAvailability(args: Record<string, unknown>) {
 
 // ------------ Realtime WebSocket server ------------ //
 
-const wss = new WebSocketServer({ port: Number(PORT) }, () => {
-  console.log(`Realtime WS server listening on ws://localhost:${PORT}`);
-});
+async function startRealtimeServer() {
+  await loadToolsFromDatabase();
+  await loadSanitizationRulesFromDatabase();
+  await loadInstructionsFromDatabase();
 
-wss.on("connection", (clientSocket: WS) => {
-  console.log("Client connected to realtime WS");
+  const wss = new WebSocketServer({ port: Number(PORT) }, () => {
+    console.log(`Realtime WS server listening on ws://localhost:${PORT}`);
+  });
+
+  wss.on("connection", (clientSocket: WS) => {
+    console.log("Client connected to realtime WS");
 
   const pendingFunctionCalls = new Map<string, PendingFunctionCall>();
   let hasPendingInputAudio = false;
@@ -1066,6 +1172,26 @@ wss.on("connection", (clientSocket: WS) => {
       typeof parsed.text === "string"
     ) {
       parsed.text = sanitizeText(parsed.text);
+    }
+
+    // When using audio_transcript.* events as the source of truth
+    // for assistant messages, also sanitize those transcripts
+    // before forwarding them to the client.
+    if (
+      parsed.type === "response.audio_transcript.delta" &&
+      typeof parsed.delta === "string"
+    ) {
+      parsed.delta = sanitizeText(parsed.delta);
+    }
+
+    if (parsed.type === "response.audio_transcript.done") {
+      const anyParsed = parsed as any;
+      if (typeof anyParsed.transcript === "string") {
+        anyParsed.transcript = sanitizeText(anyParsed.transcript);
+      }
+      if (typeof parsed.text === "string") {
+        parsed.text = sanitizeText(parsed.text);
+      }
     }
 
     if (parsed.type === "error") {
@@ -1240,7 +1366,9 @@ wss.on("connection", (clientSocket: WS) => {
       }
 
       if (msg.type === "client.audio.chunk" && typeof msg.audio === "string") {
-        if (openAiSocket.readyState === WebSocket.OPEN && msg.audio.length > 0) {
+        // WebSocket.OPEN === 1; compare against numeric value to
+        // avoid relying on library-specific static properties.
+        if (openAiSocket.readyState === 1 && msg.audio.length > 0) {
           if (!INPUT_VAD_ENABLED || !inputVad) {
             // Forward as-is (original behavior)
             openAiSocket.send(
@@ -1306,7 +1434,7 @@ wss.on("connection", (clientSocket: WS) => {
 
       // Control messages from the client to manage audio turns.
       if (msg.type === "client.audio.start") {
-        if (openAiSocket.readyState === WebSocket.OPEN) {
+        if (openAiSocket.readyState === 1) {
           // Clear any previous audio buffer state on the server side.
           openAiSocket.send(
             JSON.stringify({
@@ -1341,6 +1469,12 @@ wss.on("connection", (clientSocket: WS) => {
     console.error("Client WS error:", err);
     openAiSocket.close();
   });
+  });
+}
+
+startRealtimeServer().catch((err) => {
+  console.error("Failed to start realtime WS server:", err);
+  process.exit(1);
 });
 
 // Each turn gets a fresh prompt built server-side so we can wrap the latest

@@ -54,7 +54,7 @@ import { IconButton } from "@/components/front/ui/IconButton";
 import { LoginDialog } from "@/components/auth/LoginDialog";
 import { signOut } from "next-auth/react";
 import { ChatTextInput } from "@/components/front/chat/ChatTextInput";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   Sidebar,
   ChatSummary,
@@ -170,6 +170,29 @@ export default function ChatClientPage({
 
       if (!conversationId) return;
 
+      // Determine which sanitize rules (if any) appear to have fired
+      // on this assistant message by checking for their replacement
+      // markers in the sanitized text.
+      const appliedRules =
+        Array.isArray(sanitizeRules) && sanitizeRules.length
+          ? sanitizeRules.filter((rule) => {
+              if (!rule?.replacement) return false;
+              return trimmed.includes(rule.replacement);
+            })
+          : [];
+
+      const sanitized =
+        Array.isArray(appliedRules) && appliedRules.length > 0;
+      const sanitizationMeta =
+        sanitized && appliedRules.length
+          ? {
+              direction: "out" as const,
+              ruleIds: appliedRules
+                .map((r) => r.id)
+                .filter((id): id is string => !!id),
+            }
+          : undefined;
+
       void fetch(`/api/conversations/${conversationId}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -188,6 +211,8 @@ export default function ChatClientPage({
                 ? "voice"
                 : "text",
             bargeIn: false,
+            sanitized,
+            ...(sanitizationMeta ? { sanitization: sanitizationMeta } : {}),
           },
         }),
       }).catch((err) => {
@@ -209,7 +234,7 @@ export default function ChatClientPage({
   const [showMenu, setShowMenu] = useState(false);
   const [showSettingsDialog, setShowSettingsDialog] = useState(false);
   const [debugConfig, setDebugConfig] = useState<{
-    profile?: any;
+    instructions?: any;
     tools?: any;
     sanitize?: any;
   } | null>(null);
@@ -253,6 +278,10 @@ export default function ChatClientPage({
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const router = useRouter();
+  const pathname = usePathname();
+  const [sanitizeRules, setSanitizeRules] = useState<
+    { id?: string; replacement?: string; direction?: string }[]
+  >([]);
   const isAdminUser = userEmail === "santagar@gmail.com";
   const [isNewChatLayout, setIsNewChatLayout] = useState(true);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -309,6 +338,34 @@ export default function ChatClientPage({
       setActiveChatId(null);
     }
   }, [messages, setMessages]);
+
+  // Load sanitize rules (with DB ids) once so we can detect when any
+  // rule has actually fired on an assistant message.
+  useEffect(() => {
+    let cancelled = false;
+    async function loadSanitizeRules() {
+      try {
+        const res = await fetch("/api/config/sanitize");
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!Array.isArray(data.sanitize) || cancelled) return;
+        setSanitizeRules(
+          data.sanitize.map((r: any) => ({
+            id: r.id as string | undefined,
+            replacement:
+              typeof r.replacement === "string" ? r.replacement : undefined,
+            direction: typeof r.direction === "string" ? r.direction : "out",
+          }))
+        );
+      } catch {
+        // best-effort only; sanitize meta is optional
+      }
+    }
+    void loadSanitizeRules();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const [callStartedAt, setCallStartedAt] = useState<number | null>(null);
   const [callElapsedSeconds, setCallElapsedSeconds] = useState(0);
@@ -579,6 +636,7 @@ export default function ChatClientPage({
                 const template = t("chat.toast.unableToLoadConversation");
                 const id = initialChatId ?? "";
                 const msg = template.replace("{id}", id);
+                // Persist the toast so it is shown after redirect.
                 window.sessionStorage.setItem("va-toast", msg);
               } catch {
                 // ignore storage errors
@@ -818,11 +876,14 @@ export default function ChatClientPage({
     };
   }, []);
 
+  // Read any pending toast stored for the current route (e.g. when
+  // redirected here after a failed /c/[chatId] load).
   useEffect(() => {
     try {
-      const stored = typeof window !== "undefined"
-        ? window.sessionStorage.getItem("va-toast")
-        : null;
+      const stored =
+        typeof window !== "undefined"
+          ? window.sessionStorage.getItem("va-toast")
+          : null;
       if (stored) {
         setToast({ message: stored, tone: "error" });
         window.sessionStorage.removeItem("va-toast");
@@ -830,7 +891,7 @@ export default function ChatClientPage({
     } catch {
       // ignore storage errors
     }
-  }, []);
+  }, [pathname]);
 
   function handleDebugDragStart(e: React.MouseEvent) {
     e.preventDefault();
@@ -866,7 +927,7 @@ export default function ChatClientPage({
     async function loadDebugConfig() {
       try {
         const [profileRes, toolsRes, sanitizeRes] = await Promise.all([
-          fetch("/api/config/profile"),
+          fetch("/api/config/instructions"),
           fetch("/api/config/tools"),
           fetch("/api/config/sanitize"),
         ]);
@@ -880,7 +941,7 @@ export default function ChatClientPage({
           sanitizeRes.json(),
         ]);
         setDebugConfig({
-          profile: profileJson.profile,
+          instructions: profileJson.instructions,
           tools: toolsJson.tools,
           sanitize: sanitizeJson.sanitize,
         });
@@ -1814,10 +1875,10 @@ export default function ChatClientPage({
                                       : "text-sky-700"
                                   }`}
                                 >
-                                  Profile blocks:
+                                  Instruction blocks:
                                 </span>{" "}
                                 {Object.keys(
-                                  debugConfig.profile ?? {}
+                                  debugConfig.instructions ?? {}
                                 ).join(", ") || "none"}
                               </p>
                               <p

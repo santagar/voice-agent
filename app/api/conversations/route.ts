@@ -47,12 +47,12 @@ export async function POST(req: Request) {
       mode?: string;
       userId?: string | null;
       assistantId?: string;
-      workspaceId?: string;
+      workspaceId?: string; // kept for backward compatibility, no longer stored
     };
 
-    if (!body.assistantId || !body.workspaceId) {
+    if (!body.assistantId) {
       return NextResponse.json(
-        { error: "assistantId and workspaceId are required" },
+        { error: "assistantId is required" },
         { status: 400 }
       );
     }
@@ -68,7 +68,6 @@ export async function POST(req: Request) {
         mode: typeof body.mode === "string" ? body.mode : "unknown",
         userId: typeof body.userId === "string" ? body.userId : null,
         assistantId: body.assistantId,
-        workspaceId: body.workspaceId,
       },
     });
 
@@ -90,4 +89,3 @@ export async function POST(req: Request) {
     );
   }
 }
-
