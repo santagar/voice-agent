@@ -1,22 +1,17 @@
 "use client";
 
 import React from "react";
-import { Ellipsis, Menu } from "lucide-react";
+import { Ellipsis, HelpCircle, Menu } from "lucide-react";
 import { IconButton } from "@/components/front/ui/IconButton";
 import { Tooltip } from "@/components/front/ui/Tooltip";
-import { SelectMenu } from "@/components/front/ui/SelectMenu";
-
-export type AssistantSummary = {
-  id: string;
-  name: string;
-  description?: string | null;
-};
+import { AssistantSelector, AssistantSummary } from "./AssistantSelector";
 
 type HeaderProps = {
   isDark: boolean;
   wsConnected: boolean;
   callStatus: "idle" | "calling" | "in_call";
   loggedIn: boolean;
+  assistantHasConfig?: boolean;
   showMenu: boolean;
   onToggleMenu: () => void;
   onToggleMobileSidebar: () => void;
@@ -28,11 +23,12 @@ type HeaderProps = {
   t: (key: string) => string;
 };
 
-export function ChatHeader({
+export function Header({
   isDark,
   wsConnected,
   callStatus,
   loggedIn,
+  assistantHasConfig,
   showMenu,
   onToggleMenu,
   onToggleMobileSidebar,
@@ -44,23 +40,11 @@ export function ChatHeader({
   t,
 }: HeaderProps) {
   const callActive = callStatus === "calling" || callStatus === "in_call";
-  const assistantOptions =
-    assistants.length > 0
-      ? assistants
-      : [{ id: "default", name: "Voice Agent" }];
-  const selectedId =
-    activeAssistantId &&
-    assistantOptions.some((a) => a.id === activeAssistantId)
-      ? activeAssistantId
-      : assistantOptions[0]?.id ?? null;
 
   if (callActive) {
     // El header se oculta durante la llamada (comportamiento actual).
     return null;
   }
-
-  const selectedAssistant =
-    assistantOptions.find((a) => a.id === selectedId) ?? assistantOptions[0];
 
   return (
     <header
@@ -88,45 +72,24 @@ export function ChatHeader({
         >
           <span
             className={`status-dot ${
-              wsConnected ? "dot-online" : "dot-offline"
+              wsConnected
+                ? assistantHasConfig === false
+                  ? "dot-warning"
+                  : "dot-online"
+                : "dot-offline"
             } ml-2 mr-1 h-2.5 w-2.5`}
             aria-hidden
           />
           <div className="-ml-1.5">
-            {assistantSelectorDisabled ? (
-              <div
-                className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium ${
-                  isDark
-                    ? "bg-transparent text-gray-100"
-                    : "bg-transparent text-gray-800"
-                }`}
-              >
-                <span className="truncate text-lg">
-                  {selectedAssistant?.name ?? "Voice Agent"}
-                </span>
-              </div>
-            ) : (
-              <SelectMenu
-                isDark={isDark}
-                value={selectedId ?? ""}
-                options={assistantOptions.map((a) => ({
-                  value: a.id,
-                  label: a.name,
-                  description: a.description ?? undefined,
-                }))}
-                align="left"
-                triggerClassName={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium cursor-pointer ${
-                  isDark
-                    ? "bg-transparent text-gray-100"
-                    : "bg-transparent text-gray-800"
-                }`}
-                labelClassName="truncate text-lg"
-                onChange={(id) => {
-                  if (!id) return;
-                  onChangeAssistant(id);
-                }}
-              />
-            )}
+            <AssistantSelector
+              isDark={isDark}
+              loggedIn={loggedIn}
+              assistants={assistants}
+              activeAssistantId={activeAssistantId}
+              onChangeAssistant={onChangeAssistant}
+              disabled={assistantSelectorDisabled}
+              t={t}
+            />
           </div>
         </div>
       </div>
@@ -148,17 +111,34 @@ export function ChatHeader({
             </Tooltip>
           </IconButton>
         ) : (
-          <button
-            type="button"
-            onClick={onOpenLogin}
-            className={`inline-flex cursor-pointer rounded-full px-4 py-2 text-sm font-medium ${
-              isDark
-                ? "bg-white text-neutral-900 hover:bg-gray-100"
-                : "bg-black text-white hover:bg-neutral-900"
-            }`}
-          >
-            {t("chat.login.open")}
-          </button>
+          <>
+            <button
+              type="button"
+              onClick={onOpenLogin}
+              className={`inline-flex cursor-pointer rounded-full px-4 py-2 text-sm font-medium ${
+                isDark
+                  ? "bg-white text-neutral-900 hover:bg-gray-100"
+                  : "bg-black text-white hover:bg-neutral-900"
+              }`}
+            >
+              {t("chat.login.open")}
+            </button>
+            <IconButton
+              isDark={isDark}
+              variant="ghost"
+              className={`rounded-lg ${
+                !isDark ? "hover:bg-zinc-100" : ""
+              }`}
+              onClick={() => {}}
+              aria-label={t("chat.userMenu.help")}
+            >
+              <Tooltip label={t("chat.userMenu.help")}>
+                <span>
+                  <HelpCircle className="h-5 w-5" />
+                </span>
+              </Tooltip>
+            </IconButton>
+          </>
         )}
       </div>
     </header>

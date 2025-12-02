@@ -7,7 +7,11 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   try {
     const rows = await prisma.instruction.findMany({
-      where: { status: "active" },
+      where: {
+        status: "active",
+        assistantId: null,
+        ownerId: null,
+      },
       orderBy: { createdAt: "asc" },
     });
 

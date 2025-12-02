@@ -22,30 +22,50 @@ export async function GET(_req: Request, { params }: Params) {
       );
     }
 
-    const [allInstructions, instructionBindings, allTools, toolBindings, allRules, ruleBindings] =
-      await Promise.all([
-        prisma.instruction.findMany({
-          where: { status: "active" },
-          orderBy: { createdAt: "asc" },
-        }),
-        prisma.assistantInstruction.findMany({
-          where: { assistantId: id },
-        }),
-        prisma.tool.findMany({
-          where: { status: "active" },
-          orderBy: { createdAt: "asc" },
-        }),
-        prisma.assistantTool.findMany({
-          where: { assistantId: id },
-        }),
-        prisma.sanitizationRule.findMany({
-          where: { status: "active" },
-          orderBy: { createdAt: "asc" },
-        }),
-        prisma.assistantSanitizationRule.findMany({
-          where: { assistantId: id },
-        }),
-      ]);
+    const [
+      allInstructions,
+      instructionBindings,
+      allTools,
+      toolBindings,
+      allRules,
+      ruleBindings,
+    ] = await Promise.all([
+      prisma.instruction.findMany({
+        where: {
+          status: "active",
+          OR: [
+            { assistantId: id },
+            { assistantBindings: { some: { assistantId: id } } },
+          ],
+        },
+        orderBy: { createdAt: "asc" },
+      }),
+      prisma.assistantInstruction.findMany({
+        where: { assistantId: id },
+      }),
+      prisma.tool.findMany({
+        where: {
+          status: "active",
+          OR: [
+            // Tools creadas específicamente para este asistente
+            { assistantId: id },
+            // Tools enlazadas mediante la tabla de bindings
+            { assistantBindings: { some: { assistantId: id } } },
+          ],
+        },
+        orderBy: { createdAt: "asc" },
+      }),
+      prisma.assistantTool.findMany({
+        where: { assistantId: id },
+      }),
+      prisma.sanitizationRule.findMany({
+        where: { status: "active" },
+        orderBy: { createdAt: "asc" },
+      }),
+      prisma.assistantSanitizationRule.findMany({
+        where: { assistantId: id },
+      }),
+    ]);
 
     const instructions = allInstructions.map((inst) => {
       const binding = instructionBindings.find(
@@ -63,12 +83,22 @@ export async function GET(_req: Request, { params }: Params) {
 
     const tools = allTools.map((tool) => {
       const binding = toolBindings.find((b) => b.toolId === tool.id);
+      const def: any = tool.definitionJson || {};
+      const displayName =
+        typeof def.name === "string" && def.name.trim()
+          ? def.name.trim()
+          : tool.name;
+      const descriptionFromDef =
+        typeof def.description === "string" && def.description.trim()
+          ? def.description.trim()
+          : null;
       return {
         id: tool.id,
-        name: tool.name,
+        name: displayName,
         kind: tool.kind,
-        description: tool.description,
+        description: descriptionFromDef,
         enabled: binding ? binding.enabled : false,
+        owned: tool.assistantId === id,
       };
     });
 
@@ -88,6 +118,7 @@ export async function GET(_req: Request, { params }: Params) {
         id: assistant.id,
         name: assistant.name,
         description: assistant.description,
+        updatedAt: assistant.updatedAt.toISOString(),
       },
       instructions,
       tools,

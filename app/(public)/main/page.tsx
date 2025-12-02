@@ -1,17 +1,29 @@
-import ChatClientPage from "./Client";
+import MainClientPage from "./Client";
 import { getInitialUserPreferences } from "@/lib/server/userPreferences";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth/options";
 import { prisma } from "@/lib/prisma";
 
-export default async function ChatPage() {
+type ChatPageProps = {
+  searchParams?: Promise<{
+    assistantId?: string;
+  }>;
+};
+
+export default async function ChatPage({ searchParams }: ChatPageProps) {
+  const resolvedSearchParams =
+    searchParams !== undefined ? await searchParams : {};
   const { sidebarCollapsed: initialSidebarCollapsed } =
     await getInitialUserPreferences();
   const session = await getServerSession(authOptions);
 
   let workspaceId: string | null = null;
   let assistantId: string | null = null;
-  let assistantOptions: { id: string; name: string; description?: string | null }[] = [];
+  let assistantOptions: {
+    id: string;
+    name: string;
+    description?: string | null;
+  }[] = [];
   const userId = (session?.user as any)?.id as string | undefined;
   const email = session?.user?.email?.toLowerCase() ?? null;
 
@@ -73,7 +85,7 @@ export default async function ChatPage() {
     if (!assistant) {
       assistant = await prisma.assistant.create({
         data: {
-          name: "Default voice assistant",
+          name: "Default assistant",
           description:
             "Default realtime assistant for voice and chat interactions.",
           slug: `default-assistant-${workspace.id.slice(0, 8)}`,
@@ -83,8 +95,6 @@ export default async function ChatPage() {
         },
       });
     }
-
-    assistantId = assistant.id;
 
     // Load all assistants for this workspace/user so the header can
     // offer a selector.
@@ -96,7 +106,18 @@ export default async function ChatPage() {
       id: a.id,
       name: a.name,
       description: a.description,
+      createdAt: a.createdAt.toISOString(),
     }));
+
+    // Prefer an assistantId from the URL when valid; otherwise fall back
+    // to the default assistant we just created or found.
+    const urlAssistantId =
+      typeof resolvedSearchParams.assistantId === "string" &&
+      assistants.some((a) => a.id === resolvedSearchParams.assistantId)
+        ? resolvedSearchParams.assistantId
+        : null;
+
+    assistantId = urlAssistantId ?? assistant.id;
   }
 
   // Preload conversation summaries so the sidebar renders without
@@ -131,7 +152,7 @@ export default async function ChatPage() {
   });
 
   return (
-    <ChatClientPage
+    <MainClientPage
       initialSidebarCollapsed={initialSidebarCollapsed}
       initialLoggedIn={!!session}
       initialUserEmail={session?.user?.email ?? null}

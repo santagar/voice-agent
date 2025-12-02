@@ -372,7 +372,7 @@ export function Sidebar({
                             );
                           }}
                           className="absolute right-1 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center text-gray-500 opacity-0 group-hover:opacity-100 group-hover:text-gray-900 transition-opacity cursor-pointer"
-                          aria-label={t("chat.sidebar.chatMenu.open", "Open chat menu")}
+                          aria-label={t("chat.sidebar.chatMenu.open")}
                         >
                           <Ellipsis className="h-4 w-4" />
                         </button>
@@ -404,7 +404,7 @@ export function Sidebar({
                             >
                               <Edit3 className="h-4 w-4" />
                               <span className="flex-1 text-left">
-                                {t("chat.sidebar.rename", "Rename")}
+                                {t("chat.sidebar.rename")}
                               </span>
                             </button>
                           </div>

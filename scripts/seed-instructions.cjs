@@ -29,20 +29,35 @@ async function main() {
   );
 
   for (const [type, lines] of entries) {
-    await prisma.instruction.upsert({
-      where: { type },
-      update: {
-        label: type,
-        lines,
-        status: "active",
-      },
-      create: {
+    const existing = await prisma.instruction.findFirst({
+      where: {
         type,
-        label: type,
-        lines,
-        status: "active",
+        assistantId: null,
+        ownerId: null,
       },
     });
+
+    if (existing) {
+      await prisma.instruction.update({
+        where: { id: existing.id },
+        data: {
+          label: type,
+          lines,
+          status: "active",
+        },
+      });
+    } else {
+      await prisma.instruction.create({
+        data: {
+          type,
+          label: type,
+          lines,
+          status: "active",
+          assistantId: null,
+          ownerId: null,
+        },
+      });
+    }
 
     console.log(`  • Upserted instruction block: ${type}`);
   }

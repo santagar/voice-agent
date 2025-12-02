@@ -21,7 +21,7 @@ export async function PATCH(req: Request, { params }: Params) {
     const data: {
       type?: string;
       label?: string | null;
-      lines?: unknown;
+      lines?: any;
       status?: string;
     } = {};
 
@@ -70,3 +70,20 @@ export async function PATCH(req: Request, { params }: Params) {
   }
 }
 
+export async function DELETE(_req: Request, { params }: Params) {
+  try {
+    const { id } = await params;
+
+    await prisma.instruction.delete({
+      where: { id },
+    });
+
+    return NextResponse.json({ ok: true });
+  } catch (err: any) {
+    console.error("Failed to delete instruction:", err);
+    return NextResponse.json(
+      { error: "Failed to delete instruction" },
+      { status: 500 }
+    );
+  }
+}

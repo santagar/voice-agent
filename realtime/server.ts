@@ -243,12 +243,6 @@ let compiledSanitizeRules: CompiledSanitizationRule[] =
 
 let toolDefinitions: ToolDefinition[] = [];
 const toolMap = new Map<string, ToolDefinition>();
-let openAITools: {
-  type: "function";
-  name: string;
-  description: string;
-  parameters: NonNullable<ToolDefinition["parameters"]>;
-}[] = [];
 
 async function loadToolsFromDatabase() {
   try {
@@ -259,6 +253,10 @@ async function loadToolsFromDatabase() {
 
     toolDefinitions = dbTools.map((t) => {
       const def: any = t.definitionJson || {};
+      const descriptionFromDef =
+        typeof def.description === "string" && def.description.trim()
+          ? def.description.trim()
+          : "";
       return {
         id: t.id,
         name: t.name,
@@ -266,7 +264,7 @@ async function loadToolsFromDatabase() {
         routes: def.routes,
         ui_command: def.ui_command,
         session_update: def.session_update,
-        description: t.description || "",
+        description: descriptionFromDef,
         parameters:
           def.parameters || ({
             type: "object",
@@ -279,26 +277,67 @@ async function loadToolsFromDatabase() {
     for (const tool of toolDefinitions) {
       toolMap.set(tool.name, tool);
     }
-
-    openAITools = toolDefinitions
-      .filter((tool) => tool?.name)
-      .map((tool) => ({
-        type: "function" as const,
-        name: String(tool.name),
-        description: tool.description || "",
-        parameters:
-          tool.parameters || {
-            type: "object",
-            properties: {},
-          },
-      }));
-
     console.log(`Loaded ${toolDefinitions.length} tools from database.`);
   } catch (err) {
     console.error("Failed to load tools from database:", err);
     toolDefinitions = [];
     toolMap.clear();
-    openAITools = [];
+  }
+}
+
+async function buildOpenAIToolsForAssistant(assistantId: string | null) {
+  if (!assistantId) return [];
+
+  try {
+    const bindings = await prisma.assistantTool.findMany({
+      where: {
+        assistantId,
+        enabled: true,
+        tool: { status: "active" },
+      },
+      include: {
+        tool: true,
+      },
+      orderBy: { createdAt: "asc" },
+    });
+
+    return bindings
+      .map((binding) => {
+        const t = binding.tool;
+        if (!t) return null;
+        const def: any = t.definitionJson || {};
+        const descriptionFromDef =
+          typeof def.description === "string" && def.description.trim()
+            ? def.description.trim()
+            : "";
+        const parameters =
+          (def.parameters as ToolDefinition["parameters"]) || {
+            type: "object",
+            properties: {},
+          };
+        return {
+          type: "function" as const,
+          name: t.name,
+          description: descriptionFromDef,
+          parameters,
+        };
+      })
+      .filter(Boolean) as {
+      type: "function";
+      name: string;
+      description: string;
+      parameters: NonNullable<ToolDefinition["parameters"]>;
+    }[];
+  } catch (err) {
+    console.error(
+      "Failed to build OpenAI tools for assistant",
+      assistantId,
+      err
+    );
+    // On error we prefer to surface no tools instead of falling
+    // back to all active tools globally. TODO: in the future we may
+    // use Tool rows with assistantId = null as a curated default set.
+    return [];
   }
 }
 
@@ -335,13 +374,20 @@ async function loadSanitizationRulesFromDatabase() {
 async function loadInstructionsFromDatabase() {
   try {
     const instructions = await prisma.instruction.findMany({
-      where: { status: "active" },
+      where: {
+        status: "active",
+        // TODO: In a future iteration we may treat instructions
+        // without assistantId as global defaults. For now we only
+        // ever use per-assistant bindings, so we restrict the
+        // global profile to rows with no assistantId.
+        assistantId: null,
+      },
       orderBy: { createdAt: "asc" },
     });
 
     if (!instructions.length) {
       console.log(
-        "No Instruction rows found; using config/profile.json for session instructions."
+        "No global Instruction rows found; using config/profile.json for default session instructions."
       );
       return;
     }
@@ -358,6 +404,59 @@ async function loadInstructionsFromDatabase() {
     );
   } catch (err) {
     console.error("Failed to load instructions from database:", err);
+  }
+}
+
+async function buildSessionInstructionsForAssistant(
+  assistantId: string | null
+): Promise<string> {
+  if (!assistantId) {
+    // No assistant in context → no specific instructions.
+    return "";
+  }
+
+  try {
+    const bindings = await prisma.assistantInstruction.findMany({
+      where: {
+        assistantId,
+        enabled: true,
+        instruction: { status: "active" },
+      },
+      include: {
+        instruction: true,
+      },
+      orderBy: {
+        sortOrder: "asc",
+      },
+    });
+
+    if (!bindings.length) {
+      // Assistant without specific instruction bindings. For now we
+      // prefer an explicit empty profile instead of implicitly
+      // falling back to all global instructions. TODO: consider
+      // using Instruction rows with assistantId = null as a
+      // controlled default for assistants without config.
+      return "";
+    }
+
+    const profileObj: Record<string, string[]> = {};
+    for (const binding of bindings) {
+      const inst = binding.instruction;
+      if (!inst) continue;
+      const lines = (inst.lines as unknown) as string[] | null;
+      profileObj[inst.type] = Array.isArray(lines) ? lines : [];
+    }
+
+    return buildSessionInstructions(profileObj);
+  } catch (err) {
+    console.error(
+      "Failed to build session instructions for assistant",
+      assistantId,
+      err
+    );
+    // On error we also return an explicit empty profile rather than
+    // silently injecting all global instructions.
+    return "";
   }
 }
 
@@ -1095,6 +1194,8 @@ async function startRealtimeServer() {
   // with the correct conversation and assistant in the DB.
   let currentConversationId: string | null = null;
   let currentAssistantId: string | null = null;
+  let lastToolsAssistantId: string | null = null;
+  let lastInstructionsAssistantId: string | null = null;
 
   if (INPUT_VAD_ENABLED) {
     createVad({
@@ -1118,24 +1219,23 @@ async function startRealtimeServer() {
     },
   });
 
-  openAiSocket.on("open", () => {
-    console.log("Connected to OpenAI Realtime");
-    console.log("Registering tools:", openAITools);
+  let openAiSocketReady = false;
 
+  openAiSocket.on("open", () => {
+    openAiSocketReady = true;
+    console.log("Connected to OpenAI Realtime");
     const sessionUpdate = {
       type: "session.update",
       session: {
         // Enable both text and audio so the same session can
         // handle speech-to-speech conversations end-to-end.
         modalities: ["text", "audio"],
-        instructions: sessionInstructions,
         input_audio_format: "pcm16",
         output_audio_format: "pcm16",
         turn_detection: {
           type: "server_vad",
         },
         voice: REALTIME_VOICE,
-        tools: openAITools.length ? openAITools : undefined,
       },
     };
 
@@ -1328,6 +1428,46 @@ async function startRealtimeServer() {
         // Simple guard: trim excessively long prompts
         if (userText.length > 4000) {
           userText = userText.slice(0, 4000);
+        }
+
+        // 0) Refresh tools & instructions for this assistant, if needed.
+        if (
+          currentAssistantId &&
+          currentAssistantId !== lastToolsAssistantId &&
+          openAiSocketReady
+        ) {
+          lastToolsAssistantId = currentAssistantId;
+          lastInstructionsAssistantId = currentAssistantId;
+          try {
+            await loadToolsFromDatabase();
+            const toolsForAssistant = await buildOpenAIToolsForAssistant(
+              currentAssistantId
+            );
+            const instructionsForAssistant =
+              await buildSessionInstructionsForAssistant(currentAssistantId);
+            console.log(
+              "Updating OpenAI session config for assistant",
+              currentAssistantId,
+              "tools:",
+              toolsForAssistant.map((t) => t.name)
+            );
+            const toolsUpdate = {
+              type: "session.update",
+              session: {
+                tools: toolsForAssistant.length
+                  ? toolsForAssistant
+                  : undefined,
+                instructions: instructionsForAssistant,
+              },
+            };
+            openAiSocket.send(JSON.stringify(toolsUpdate));
+          } catch (err) {
+            console.error(
+              "Failed to refresh tools for assistant",
+              currentAssistantId,
+              err
+            );
+          }
         }
 
         // 1) Build vector context (if the KB is loaded)

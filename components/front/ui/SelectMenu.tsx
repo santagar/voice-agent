@@ -7,6 +7,8 @@ export type SelectMenuOption = {
   value: string;
   label: string;
   description?: string;
+  kind?: "option" | "action" | "separator";
+  iconLeft?: React.ReactNode;
 };
 
 type SelectMenuProps = {
@@ -88,7 +90,7 @@ export function SelectMenu({
       </button>
       {open && (
         <div
-          className={`absolute z-40 mt-1 w-60 rounded-xl border shadow-lg backdrop-blur-sm ${
+          className={`absolute z-40 mt-1 w-72 rounded-xl border shadow-lg backdrop-blur-sm ${
             align === "right" ? "right-0" : "left-0"
           } ${
             isDark
@@ -96,33 +98,61 @@ export function SelectMenu({
               : "border-zinc-200 bg-white"
           } ${fullWidth ? "w-full" : ""}`}
         >
-          {options.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              onClick={() => {
-                onChange(option.value);
-                setOpen(false);
-              }}
-              className={`mx-1 my-0.5 flex w-[calc(100%-0.5rem)] items-start gap-2 rounded-lg px-3 py-2 text-sm cursor-pointer ${
-                isDark
-                  ? "text-gray-100 hover:bg-white/10"
-                  : "text-gray-800 hover:bg-zinc-50"
-              } ${fullWidth ? "mx-0 w-full" : ""}`}
-            >
-              <div className="flex-1 text-left">
-                <div className="font-medium">{option.label}</div>
-                {option.description && (
-                  <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                    {option.description}
-                  </div>
+          {options.map((option) => {
+            if (option.kind === "separator") {
+              return (
+                <div
+                  key={option.value}
+                  className={`my-1 mx-3 h-px ${
+                    isDark ? "bg-white/10" : "bg-zinc-200"
+                  }`}
+                />
+              );
+            }
+
+            const isSelected =
+              (option.kind === "option" || !option.kind) &&
+              value === option.value;
+
+            return (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => {
+                  onChange(option.value);
+                  setOpen(false);
+                }}
+                className={`mx-1 my-1 flex w-[calc(100%-0.5rem)] items-center gap-2 rounded-lg px-3 py-2.5 text-sm cursor-pointer ${
+                  isDark
+                    ? "text-gray-100 hover:bg-white/10"
+                    : "text-gray-800 hover:bg-zinc-100"
+                } ${fullWidth ? "mx-0 w-full" : ""}`}
+              >
+                {option.iconLeft && (
+                  <span className="flex h-4 w-4 items-center justify-center text-gray-600 dark:text-gray-300">
+                    {option.iconLeft}
+                  </span>
                 )}
-              </div>
-              {value === option.value && (
-                <Check className="h-4 w-4 text-gray-400" />
-              )}
-            </button>
-          ))}
+                <div className="flex-1 text-left">
+                  <div className="font-medium">{option.label}</div>
+                  {option.description && (
+                    <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                      {option.description}
+                    </div>
+                  )}
+                </div>
+                {isSelected && (
+                  <span className="flex h-4 w-4 items-center justify-center">
+                    <Check
+                      className={`h-4 w-4 ${
+                        isDark ? "text-gray-300" : "text-gray-600"
+                      }`}
+                    />
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
       )}
     </div>

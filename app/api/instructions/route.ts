@@ -8,6 +8,8 @@ export async function POST(req: Request) {
       label?: string | null;
       lines?: string[];
       status?: string;
+      assistantId?: string | null;
+      ownerId?: string | null;
     };
 
     const type =
@@ -21,24 +23,94 @@ export async function POST(req: Request) {
       );
     }
 
+    const assistantId =
+      typeof body.assistantId === "string" && body.assistantId.trim()
+        ? body.assistantId.trim()
+        : null;
+    const ownerId =
+      typeof body.ownerId === "string" && body.ownerId.trim()
+        ? body.ownerId.trim()
+        : null;
+
     const linesArray = Array.isArray(body.lines)
       ? body.lines.map((line) => String(line))
       : [];
 
-    const instruction = await prisma.instruction.create({
-      data: {
-        type,
-        label:
-          typeof body.label === "string" && body.label.trim()
-            ? body.label.trim()
-            : null,
-        lines: linesArray,
-        status:
-          typeof body.status === "string" && body.status.trim()
-            ? body.status.trim()
-            : "active",
-      },
-    });
+    const baseData = {
+      label:
+        typeof body.label === "string" && body.label.trim()
+          ? body.label.trim()
+          : null,
+      lines: linesArray,
+      status:
+        typeof body.status === "string" && body.status.trim()
+          ? body.status.trim()
+          : "active",
+    } as const;
+
+    let instruction;
+
+    if (assistantId) {
+      const existing = await prisma.instruction.findFirst({
+        where: {
+          assistantId,
+          type,
+        },
+      });
+
+      if (existing) {
+        instruction = await prisma.instruction.update({
+          where: { id: existing.id },
+          data: {
+            ...baseData,
+            assistantId,
+            ownerId,
+          },
+        });
+      } else {
+        instruction = await prisma.instruction.create({
+          data: {
+            ...baseData,
+            type,
+            assistantId,
+            ownerId,
+          },
+        });
+      }
+    } else if (ownerId) {
+      const existing = await prisma.instruction.findFirst({
+        where: {
+          ownerId,
+          type,
+        },
+      });
+
+      if (existing) {
+        instruction = await prisma.instruction.update({
+          where: { id: existing.id },
+          data: {
+            ...baseData,
+            ownerId,
+            assistantId: null,
+          },
+        });
+      } else {
+        instruction = await prisma.instruction.create({
+          data: {
+            ...baseData,
+            type,
+            ownerId,
+          },
+        });
+      }
+    } else {
+      instruction = await prisma.instruction.create({
+        data: {
+          ...baseData,
+          type,
+        },
+      });
+    }
 
     return NextResponse.json({
       instruction: {
@@ -57,4 +129,3 @@ export async function POST(req: Request) {
     );
   }
 }
-

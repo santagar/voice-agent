@@ -36,6 +36,8 @@ async function main() {
     }
 
     const definitionJson = {
+      name,
+      description: description || "",
       parameters,
     };
 
@@ -49,24 +51,38 @@ async function main() {
       definitionJson.session_update = session_update;
     }
 
-    await prisma.tool.upsert({
-      where: { name },
-      update: {
-        description: description || null,
-        kind,
-        type: "function",
-        definitionJson,
-        status: "active",
-      },
-      create: {
+    // For templates we always keep a single global row (assistantId = null)
+    // per tool name. We can't use `upsert` with a composite unique where
+    // one side is nullable, so we emulate it with findFirst + update/create.
+    const existing = await prisma.tool.findFirst({
+      where: {
         name,
-        description: description || null,
-        kind,
-        type: "function",
-        definitionJson,
-        status: "active",
+        assistantId: null,
       },
     });
+
+    if (existing) {
+      await prisma.tool.update({
+        where: { id: existing.id },
+        data: {
+          kind,
+          type: "function",
+          definitionJson,
+          status: "active",
+        },
+      });
+    } else {
+      await prisma.tool.create({
+        data: {
+          name,
+          kind,
+          type: "function",
+          definitionJson,
+          status: "active",
+          assistantId: null,
+        },
+      });
+    }
 
     console.log(`  • Upserted tool: ${name}`);
   }
@@ -82,4 +98,3 @@ main()
   .finally(async () => {
     await prisma.$disconnect();
   });
-
