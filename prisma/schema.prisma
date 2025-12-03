@@ -417,3 +417,19 @@ model AuthAccount {
   @@unique([provider, providerAccountId], map: "provider_account_unique")
   @@map("auth_accounts")
 }
+
+model Article {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt      @map("updated_at")
+
+  slug     String
+  locale   String
+  title    String
+  category String?
+  summary  String?
+  mdUrl    String
+
+  @@unique([slug, locale], map: "help_article_slug_locale_unique")
+  @@map("articles")
+}

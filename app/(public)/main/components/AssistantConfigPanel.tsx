@@ -22,7 +22,10 @@ import {
   X,
 } from "lucide-react";
 import { Tooltip } from "@/components/front/ui/Tooltip";
+import { InfoPopover } from "@/components/front/ui/InfoPopover";
 import { useLocale } from "@/components/locale/LocaleContext";
+
+const INSTRUCTIONS_HELP_URL = "/help/how-to-write-instructions";
 
 export type AssistantConfigInstruction = {
   id: string;
@@ -367,37 +370,50 @@ export function AssistantConfigPanel({
 
   const BUILTIN_INSTRUCTION_TYPES = useMemo(
     () => [
-      "identity",
-      "tone_guidelines",
-      "answer_policies",
-      "tool_policies",
-      "escalation_policies",
-      "safety_rules"
+      "identity_and_scope",
+      "communication_style",
+      "answer_behavior",
+      "tool_usage",
+      "safety_and_escalation",
+      // Optional advanced/extension categories
+      "persona",
+      "safety_technical",
+      "domain_expertise",
+      "restrictions",
+      "custom"
     ],
     []
   );
 
   const INSTRUCTION_TYPE_DESCRIPTIONS: Record<string, string> = useMemo(
     () => ({
-      identity:
-        "Identity blocks define the core persona and role of the assistant.",
-      tone_guidelines:
-        "Tone guideline blocks describe the style, tone, and voice used in responses.",
-      answer_policies:
-        "Answer policy blocks specify how the assistant should structure and prioritize answers.",
-      tool_policies:
-        "Tool policy blocks explain how the assistant should use tools and when to call them.",
-      escalation_policies:
-        "Escalation policy blocks describe when and how to hand off to a human or another system.",
-      safety_rules:
-        "Safety rule blocks define safety constraints, disallowed content, and red lines.",
+      identity_and_scope:
+        "Defines who the assistant is, what its role is, and the boundaries of its domain. This block establishes the assistant’s purpose and capabilities.",
+      communication_style:
+        "Describes how the assistant should speak: tone, pacing, empathy, formality, and any optional personality flavor.",
+      answer_behavior:
+        "Specifies how the assistant should structure its responses, including clarity, conciseness, data-requesting behavior, and conversational flow.",
+      tool_usage:
+        "Explains when and how the assistant should call tools, what data is required, how errors are handled, and how to communicate tool results naturally.",
+      safety_and_escalation:
+        "Defines safety rules, forbidden actions, privacy constraints, and how the assistant should escalate to a human when it reaches its limits.",
+      // Optional advanced/extension categories
+      persona:
+        "Optional persona or brand-voice layer. Use this for thematic or stylistic behavior (e.g., humorous, corporate, Star Wars, etc.).",
+      safety_technical:
+        "Technical safety constraints, including restrictions on exposing internal infrastructure, credentials, or sensitive operational details.",
+      domain_expertise:
+        "Defines the domain knowledge, business logic, and contextual understanding the assistant should apply.",
+      restrictions:
+        "Hard behavioral limits independent from general safety rules. Specifies actions the assistant must never perform.",
       custom:
-        "Use a custom type when your block does not fit the built‑in categories.",
+        "Use this type when the instruction block does not fit any built-in category. Ideal for experimental or highly specific behaviors.",
       default:
-        "Select a type to better organize this instruction block and its purpose.",
+        "Select a category to organize this instruction block according to its purpose."
     }),
     []
   );
+
   const [showInstructionEditorTypeMenu, setShowInstructionEditorTypeMenu] =
     useState(false);
   const [
@@ -704,7 +720,42 @@ export function AssistantConfigPanel({
                       >
                         Instructions
                       </span>
-                      <Info className="h-3.5 w-3.5 text-zinc-400" />
+                      <InfoPopover
+                        isDark={isDark}
+                        label={
+                          <span className="block max-w-[340px] text-left leading-5">
+                            Add concise instructions grouped by block. Use the built-in types or create custom types, but keep one instruction per line. Bear in mind then order matters: who you are → how you speak → how you answer → how you use tools → limits/safety.
+                            {" "}
+                            <a
+                              href={INSTRUCTIONS_HELP_URL}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="font-semibold underline"
+                            >
+                              Learn more
+                            </a>
+                          </span>
+                        }
+                      >
+                        <button
+                          type="button"
+                          onClick={() =>
+                            window.open(
+                              INSTRUCTIONS_HELP_URL,
+                              "_blank",
+                              "noopener,noreferrer"
+                            )
+                          }
+                          className={`flex h-6 w-6 items-center justify-center rounded-full ${
+                            isDark
+                              ? "text-zinc-400 hover:bg-white/10"
+                              : "text-zinc-500 hover:bg-zinc-100"
+                          }`}
+                          aria-label="Open instructions help"
+                        >
+                          <Info className="h-3.5 w-3.5" />
+                        </button>
+                      </InfoPopover>
                     </div>
                     <button
                       type="button"
@@ -965,7 +1016,8 @@ export function AssistantConfigPanel({
                       >
                         File Search
                       </span>
-                      <Tooltip
+                      <InfoPopover
+                        isDark={isDark}
                         label={
                           "File Search enables the assistant with knowledge from files that you or your users upload.\nOnce a file is uploaded, the assistant automatically decides when to retrieve content based on user requests."
                         }
@@ -977,7 +1029,7 @@ export function AssistantConfigPanel({
                         >
                           <Info className="h-3.5 w-3.5" />
                         </button>
-                      </Tooltip>
+                      </InfoPopover>
                     </div>
                     <button
                       type="button"
@@ -1007,7 +1059,8 @@ export function AssistantConfigPanel({
                       >
                         Code interpreter
                       </span>
-                      <Tooltip
+                      <InfoPopover
+                        isDark={isDark}
                         label={
                           "Code Interpreter enables the assistant to write and run code.\nThis tool can process files with diverse data and formatting, and generate files such as graphs."
                         }
@@ -1019,7 +1072,7 @@ export function AssistantConfigPanel({
                         >
                           <Info className="h-3.5 w-3.5" />
                         </button>
-                      </Tooltip>
+                      </InfoPopover>
                     </div>
                     <button
                       type="button"
@@ -1045,7 +1098,8 @@ export function AssistantConfigPanel({
                       >
                         Functions
                       </span>
-                      <Tooltip
+                      <InfoPopover
+                        isDark={isDark}
                         label={
                           "Function calling lets you describe custom functions of your app or external APIs to the assistant.\nThis allows the assistant to intelligently call those functions by outputting a JSON object containing relevant arguments."
                         }
@@ -1057,7 +1111,7 @@ export function AssistantConfigPanel({
                         >
                           <Info className="h-3.5 w-3.5" />
                         </button>
-                      </Tooltip>
+                      </InfoPopover>
                     </div>
                     <button
                       type="button"
@@ -2169,7 +2223,7 @@ export function AssistantConfigPanel({
               <div className="mb-2">
                 <input
                   type="text"
-                  placeholder="identity, tone_guideline, safety..."
+                  placeholder="identity_and_scope, communication_style, answer_behavior..."
                   value={instructionEditorType}
                   onChange={(e) =>
                     setInstructionEditorType(e.target.value)

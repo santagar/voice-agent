@@ -104,7 +104,7 @@ export function Tooltip({
     visible && mounted
       ? createPortal(
           <div
-            className="pointer-events-none fixed z-[999] max-w-xs break-words rounded-md bg-black px-2 py-1 text-[11px] font-medium text-white shadow-lg whitespace-pre-line"
+            className="pointer-events-none fixed z-[999] max-w-xs whitespace-nowrap rounded-md bg-black px-2 py-1 text-[11px] font-medium text-white shadow-lg"
             style={style}
           >
             {label}

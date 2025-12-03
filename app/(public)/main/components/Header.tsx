@@ -48,9 +48,7 @@ export function Header({
 
   return (
     <header
-      className={`sticky top-0 z-20 flex flex-wrap items-center justify-between gap-2 px-2 py-2 transition-colors md:flex ${
-        isDark ? "bg-neutral-800" : "bg-transparent"
-      }`}
+      className={`sticky top-0 z-20 flex h-14 flex-wrap items-center justify-between gap-2 border-b px-3 md:flex border-none`}
     >
       <div className="flex items-center gap-1.5">
         <IconButton

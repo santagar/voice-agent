@@ -67,7 +67,13 @@ export function AssistantSelector({
             label: t("chat.assistants.openEditor"),
             description: t("chat.assistants.openEditorHelper"),
             kind: "action" as const,
-            iconLeft: <SquarePen className="h-4 w-4" />,
+            iconLeft: (
+              <SquarePen
+                className={`h-4 w-4 ${
+                  isDark ? "text-gray-100" : "text-gray-800"
+                }`}
+              />
+            ),
           },
         ]
       : baseOptions;
