@@ -2,6 +2,7 @@
 
 import React from "react";
 import { Ellipsis, HelpCircle, Menu } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { IconButton } from "@/components/front/ui/IconButton";
 import { Tooltip } from "@/components/front/ui/Tooltip";
 import { AssistantSelector, AssistantSummary } from "./AssistantSelector";
@@ -40,6 +41,7 @@ export function Header({
   t,
 }: HeaderProps) {
   const callActive = callStatus === "calling" || callStatus === "in_call";
+  const router = useRouter();
 
   if (callActive) {
     // El header se oculta durante la llamada (comportamiento actual).
@@ -127,7 +129,7 @@ export function Header({
               className={`rounded-lg ${
                 !isDark ? "hover:bg-zinc-100" : ""
               }`}
-              onClick={() => {}}
+              onClick={() => router.push("/help")}
               aria-label={t("chat.userMenu.help")}
             >
               <Tooltip label={t("chat.userMenu.help")}>

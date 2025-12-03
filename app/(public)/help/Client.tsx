@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { ArrowRight, Search } from "lucide-react";
+import { ArrowRight, ChevronRight, Search, X } from "lucide-react";
 import Link from "next/link";
 import { useLocale } from "@/components/locale/LocaleContext";
 import { useTheme } from "@/components/theme/ThemeContext";
@@ -45,10 +45,7 @@ export function Client({ articles }: ClientProps) {
     : "bg-white text-slate-900";
   const mutedText = isDark ? "text-zinc-400" : "text-slate-600";
   const cardBg = isDark ? "bg-neutral-900" : "bg-white";
-  const cardBorder = isDark ? "border-white/10" : "border-zinc-200";
-  const pillButton = isDark
-    ? "text-zinc-100 hover:bg-white/10"
-    : "text-slate-700 hover:bg-zinc-100";
+  const cardBorder = isDark ? "border-white/10" : "border-slate-200";
 
   return (
     <main className={`min-h-screen ${pageBackground}`}>
@@ -61,19 +58,34 @@ export function Client({ articles }: ClientProps) {
 
       <div className="mx-auto max-w-6xl px-5 pb-16 pt-8 sm:px-6 lg:px-8">
         <div className="mb-8">
-          <div className="flex items-center gap-3 rounded-full border px-4 py-2 text-sm shadow-sm transition focus-within:ring-2 focus-within:ring-black/10 dark:border-white/10 dark:focus-within:ring-white/10">
-            <Search className={`h-4 w-4 ${mutedText}`} />
+          <div
+            className={`flex items-center gap-3 border-b pb-3 transition ${
+              isDark
+                ? "border-white/20 focus-within:border-white"
+                : "border-slate-300 focus-within:border-slate-800"
+            }`}
+          >
+            <Search className={`h-5 w-5 ${isDark ? "text-zinc-300" : "text-slate-600"}`} />
             <input
               type="search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search help articles..."
-              className="w-full bg-transparent text-sm outline-none placeholder:text-slate-400 dark:placeholder:text-zinc-500"
+              placeholder="Search for articles..."
+              className="w-full bg-transparent text-lg outline-none appearance-none placeholder:text-slate-500 dark:placeholder:text-zinc-500 text-slate-900 dark:text-white [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden"
             />
+            {query ? (
+              <button
+                type="button"
+                onClick={() => setQuery("")}
+                aria-label="Clear search"
+                className={`flex h-7 w-7 items-center justify-center rounded-full transition ${
+                  isDark ? "text-zinc-300 hover:bg-white/10" : "text-slate-600 hover:bg-slate-200"
+                }`}
+              >
+                <X className="h-5 w-5" />
+              </button>
+            ) : null}
           </div>
-          <p className={`mt-3 text-sm ${mutedText}`}>
-            Showing {filtered.length} article{filtered.length === 1 ? "" : "s"} in {locale.toUpperCase()}.
-          </p>
         </div>
 
         <div className="space-y-3">
@@ -81,7 +93,9 @@ export function Client({ articles }: ClientProps) {
             <Link
               key={`${article.locale}-${article.slug}`}
               href={`/help/${article.slug}`}
-              className={`block rounded-2xl border ${cardBorder} ${cardBg} px-5 py-4 transition hover:-translate-y-[1px] hover:shadow-sm`}
+              className={`block rounded-2xl border ${cardBorder} ${cardBg} px-5 py-4 transition ${
+                isDark ? "hover:bg-neutral-800" : "hover:bg-slate-50"
+              }`}
             >
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
@@ -94,7 +108,7 @@ export function Client({ articles }: ClientProps) {
                     </p>
                   ) : null}
                 </div>
-                <ArrowRight className={`h-4 w-4 ${mutedText}`} />
+                <ChevronRight className={`h-5 w-5 ${mutedText}`} />
               </div>
             </Link>
           ))}

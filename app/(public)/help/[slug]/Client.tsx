@@ -2,7 +2,7 @@
 
 import React from "react";
 import ReactMarkdown from "react-markdown";
-import { Copy } from "lucide-react";
+import { Copy, FileText } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useLocale } from "@/components/locale/LocaleContext";
 import { useTheme } from "@/components/theme/ThemeContext";
@@ -18,6 +18,7 @@ type ArticleClientProps = {
   markdown: string;
   updatedAt?: string;
   titleOverride?: string | null;
+  mdUrl?: string;
 };
 
 const KEY_COLOR = "#ec4899";
@@ -143,22 +144,22 @@ function extractHeadings(markdown: string): Heading[] {
     .filter(Boolean) as Heading[];
 }
 
-export function Client({ markdown, updatedAt, titleOverride }: ArticleClientProps) {
+export function Client({ markdown, updatedAt, titleOverride, mdUrl }: ArticleClientProps) {
   const { locale, setLocale } = useLocale();
   const { theme } = useTheme();
   const router = useRouter();
   const didMountRef = React.useRef(false);
   const isDark = theme === "dark";
   const sharedBackground = isDark ? "bg-neutral-900/80" : "bg-white/80";
-  const pageBackground = `${sharedBackground} ${isDark ? "text-zinc-100" : "text-slate-900"}`;
-  const mutedText = isDark ? "text-zinc-400" : "text-slate-600";
-  const bodyText = isDark ? "text-zinc-200" : "text-slate-800";
+  const pageBackground = `${sharedBackground} ${isDark ? "text-zinc-100" : "text-gray-900"}`;
+  const mutedText = isDark ? "text-zinc-400" : "text-gray-600";
+  const bodyText = isDark ? "text-zinc-200" : "text-gray-800";
   const navLink = isDark
     ? "text-zinc-100 hover:bg-white/10"
-    : "text-slate-800 hover:bg-zinc-100";
+    : "text-gray-800 hover:bg-zinc-100";
   const pillButton = isDark
     ? "text-zinc-100 hover:bg-white/10"
-    : "text-slate-700 hover:bg-zinc-100";
+    : "text-gray-700 hover:bg-zinc-100";
   const codeBlock = "border-white/10 bg-neutral-800 text-zinc-100";
   const inlineCode = "bg-neutral-800 text-zinc-100";
 
@@ -197,6 +198,40 @@ export function Client({ markdown, updatedAt, titleOverride }: ArticleClientProp
     window.addEventListener("hashchange", handleHashChange);
     return () => window.removeEventListener("hashchange", handleHashChange);
   }, []);
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((a, b) => b.intersectionRatio - a.intersectionRatio);
+        if (visible.length > 0) {
+          const id = visible[0].target.getAttribute("id");
+          if (id) {
+            setActiveHash(`#${id}`);
+          }
+        }
+      },
+      {
+        root: null,
+        rootMargin: "-20% 0px -60% 0px",
+        threshold: [0, 0.25, 0.5, 0.75, 1],
+      }
+    );
+
+    const sectionIds = headings
+      .filter((h) => h.level === 2)
+      .map((h) => h.id)
+      .filter(Boolean);
+
+    sectionIds.forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) observer.observe(el);
+    });
+
+    return () => observer.disconnect();
+  }, [headings]);
 
   const navHeadings = headings.filter((h) => h.level === 2);
 
@@ -295,7 +330,7 @@ export function Client({ markdown, updatedAt, titleOverride }: ArticleClientProp
               className={`absolute right-3 top-3 z-10 inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium transition ${
                 isDark
                   ? "border-white/15 bg-neutral-800 text-zinc-100 hover:bg-neutral-700"
-                  : "border-black/10 bg-white text-slate-900 hover:bg-zinc-50"
+                  : "border-black/10 bg-white text-gray-900 hover:bg-zinc-50"
               }`}
               aria-label={copied ? "Copied" : "Copy code"}
             >
@@ -314,15 +349,32 @@ export function Client({ markdown, updatedAt, titleOverride }: ArticleClientProp
 
   return (
     <main className={`min-h-screen ${pageBackground}`}>
-      <Header title="Help" subtitle="" backHref="/" backLabel="Back to home" />
+      <Header title="Help" subtitle="" />
 
       <div className="mx-auto max-w-5xl px-5 pt-10 sm:px-6 lg:px-8">
         {lastUpdatedDate && heroTitle ? (
-          <section className="text-center">
+          <section className="text-center space-y-4">
             <p className={`text-sm ${mutedText}`}>{formatDate(lastUpdatedDate)}</p>
-            <h1 className="mt-6 text-center text-4xl font-semibold tracking-tight">
+            <h1 className="text-center text-4xl font-semibold tracking-tight">
               {heroTitle}
             </h1>
+            {mdUrl ? (
+              <div className="flex justify-center">
+                <a
+                  href={mdUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-sm font-medium transition ${
+                    isDark
+                      ? "text-zinc-100 hover:bg-white/10"
+                      : "text-gray-900 hover:bg-zinc-100"
+                  }`}
+                >
+                  <FileText className="h-4 w-4" />
+                  View as Markdown
+                </a>
+              </div>
+            ) : null}
           </section>
         ) : null}
       </div>
@@ -330,12 +382,12 @@ export function Client({ markdown, updatedAt, titleOverride }: ArticleClientProp
       <div className="mx-auto flex max-w-6xl gap-6 px-5 pb-16 pt-20 sm:px-6 lg:gap-8 lg:px-8">
         <aside className="hidden w-56 shrink-0 lg:block">
           <div className="sticky top-32 space-y-4">
-            <nav className={`mb-4 flex items-center gap-2 text-sm ${mutedText}`}>
-              <a href="/help" className="hover:underline">
+            <nav className="mb-4 flex items-center gap-2 text-sm text-slate-900 dark:text-zinc-100">
+              <a href="/help" className={`hover:underline ${mutedText}`}>
                 Help
               </a>
               <span className={mutedText}>/</span>
-              <span className="text-slate-900 dark:text-zinc-100">
+              <span className="font-semibold">
                 {heroTitle || "Article"}
               </span>
             </nav>
@@ -359,12 +411,12 @@ export function Client({ markdown, updatedAt, titleOverride }: ArticleClientProp
         </aside>
 
         <div className="flex-1 max-w-3xl w-full mx-auto px-1 sm:px-0">
-          <nav className={`mb-6 flex items-center gap-2 text-sm ${mutedText} pl-1 sm:pl-0 lg:hidden`}>
-            <a href="/help" className="hover:underline">
+          <nav className="mb-6 flex items-center gap-2 text-sm pl-1 sm:pl-0 lg:hidden text-slate-900 dark:text-zinc-100">
+            <a href="/help" className={`hover:underline ${mutedText}`}>
               Help
             </a>
             <span className={mutedText}>/</span>
-            <span className="text-slate-900 dark:text-zinc-100">
+            <span className="font-semibold">
               {heroTitle || "Article"}
             </span>
           </nav>

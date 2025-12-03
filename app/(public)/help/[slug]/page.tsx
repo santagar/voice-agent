@@ -29,6 +29,7 @@ export default async function HelpArticlePage({
     articles[0];
 
   let markdown = "";
+  let resolvedMdUrl: string | undefined;
   try {
     const base =
       typeof process.env.NEXT_PUBLIC_SITE_URL === "string" &&
@@ -39,6 +40,7 @@ export default async function HelpArticlePage({
       ? article.mdUrl
       : new URL(article.mdUrl, base).toString();
 
+    resolvedMdUrl = url;
     const res = await fetch(url, { cache: "no-store" });
     if (!res.ok) throw new Error(`Failed to fetch markdown: ${res.status}`);
     markdown = await res.text();
@@ -52,6 +54,7 @@ export default async function HelpArticlePage({
       markdown={markdown}
       updatedAt={article.updatedAt?.toISOString?.() ?? undefined}
       titleOverride={article.title}
+      mdUrl={resolvedMdUrl}
     />
   );
 }

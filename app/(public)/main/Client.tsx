@@ -20,6 +20,7 @@ import {
   LogOut,
   Menu,
   ArrowDown,
+  ArrowUpRight,
   Mic,
   MicOff,
   Moon,
@@ -1381,14 +1382,37 @@ export default function MainClientPage({
               <div className="pb-3 px-2 text-xs">
                 <button
                   type="button"
-                  className={`mb-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm text-left ${
+                  className={`group mb-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm text-left ${
                     isDark
                       ? "text-gray-100 hover:bg-white/10"
                       : "text-gray-800 hover:bg-zinc-100"
                   }`}
+                  onClick={() => {
+                    setShowUserMenu(false);
+                    window.open("/help", "_blank", "noreferrer");
+                  }}
+                  aria-label={t("chat.userMenu.help")}
+                  title={t("chat.userMenu.help")}
+                  role="link"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setShowUserMenu(false);
+                      window.open("/help", "_blank", "noreferrer");
+                    }
+                  }}
                 >
-                  <HelpCircle className="h-4 w-4" />
-                  <span>{t("chat.userMenu.help")}</span>
+                  <div className="flex flex-1 items-center gap-2">
+                    <HelpCircle className="h-4 w-4" />
+                    <span>{t("chat.userMenu.help")}</span>
+                  </div>
+                  <ArrowUpRight
+                    className={`h-4 w-4 transition-opacity ${
+                      isDark ? "text-gray-200" : "text-gray-700"
+                    } opacity-0 group-hover:opacity-100`}
+                    aria-hidden
+                  />
                 </button>
                 <button
                   type="button"
