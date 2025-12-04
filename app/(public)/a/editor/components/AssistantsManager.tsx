@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Bot, Plus, Wand2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Bot, Loader2, Plus, Wand2 } from "lucide-react";
 import {
-  AssistantConfigPanel,
+  AssistantSettingsPanel,
   AssistantConfig,
-} from "./AssistantConfigPanel";
+} from "./AssistantSettingsPanel";
 import { ConfirmDialog } from "@/components/front/ui/ConfirmDialog";
 
 export type EditorAssistantSummary = {
@@ -15,7 +15,7 @@ export type EditorAssistantSummary = {
   createdAt?: string;
 };
 
-type AssistantsEditorPanelProps = {
+type AssistantsManagerProps = {
   isDark: boolean;
   t: (key: string) => string;
   currentUserId: string | null;
@@ -26,7 +26,7 @@ type AssistantsEditorPanelProps = {
   onActiveAssistantChange: (id: string | null) => void;
 };
 
-export function AssistantsEditorPanel({
+export function AssistantsManager({
   isDark,
   t,
   currentUserId,
@@ -35,7 +35,7 @@ export function AssistantsEditorPanel({
   activeAssistantId,
   onAssistantsChange,
   onActiveAssistantChange,
-}: AssistantsEditorPanelProps) {
+}: AssistantsManagerProps) {
   const [assistantConfig, setAssistantConfig] =
     useState<AssistantConfig | null>(null);
   const [assistantConfigLoading, setAssistantConfigLoading] = useState(false);
@@ -52,6 +52,17 @@ export function AssistantsEditorPanel({
   const [pendingDeleteAssistantId, setPendingDeleteAssistantId] = useState<
     string | null
   >(null);
+  const loadIdRef = useRef(0);
+  const [configCache, setConfigCache] = useState<Record<string, AssistantConfig>>(
+    {}
+  );
+  const inFlightRef = useRef<Record<string, Promise<AssistantConfig> | undefined>>(
+    {}
+  );
+
+  const cacheConfig = (id: string, config: AssistantConfig) => {
+    setConfigCache((prev) => ({ ...prev, [id]: config }));
+  };
 
   const selectedAssistant = useMemo(
     () => assistants.find((a) => a.id === activeAssistantId) ?? null,
@@ -110,29 +121,72 @@ export function AssistantsEditorPanel({
       setAssistantConfigLoading(false);
       return;
     }
+    // If we already have the config cached, reuse it to avoid extra fetch/render jumps.
+    const cached = configCache[activeAssistantId];
+    if (cached) {
+      setAssistantConfig(cached);
+      setAssistantConfigLoading(false);
+      setAssistantConfigError(null);
+      return;
+    }
+
+    // Reuse any in-flight fetch for this assistant (helps with StrictMode double effects).
+    const existing = inFlightRef.current[activeAssistantId];
+    if (existing) {
+      const loadId = ++loadIdRef.current;
+      setAssistantConfigLoading(true);
+      setAssistantConfigError(null);
+      existing
+        .then((data) => {
+          if (loadId === loadIdRef.current) {
+            setAssistantConfig(data);
+            cacheConfig(activeAssistantId, data);
+          }
+        })
+        .catch(() => {
+          if (loadId === loadIdRef.current) {
+            setAssistantConfigError("Failed to load assistant configuration.");
+          }
+        })
+        .finally(() => {
+          if (loadId === loadIdRef.current) {
+            setAssistantConfigLoading(false);
+          }
+          delete inFlightRef.current[activeAssistantId];
+        });
+      return;
+    }
+
     let cancelled = false;
     async function loadConfig() {
+      const loadId = ++loadIdRef.current;
       try {
         setAssistantConfigLoading(true);
         setAssistantConfigError(null);
-        const res = await fetch(`/api/assistants/${activeAssistantId}/config`);
-        if (!res.ok) {
-          setAssistantConfigError("Failed to load assistant configuration.");
-          return;
-        }
-        const data = (await res.json()) as AssistantConfig;
-        if (!cancelled) {
+        const promise = fetch(
+          `/api/assistants/${activeAssistantId}/config`
+        ).then(async (res) => {
+          if (!res.ok) {
+            throw new Error("Failed to load assistant configuration.");
+          }
+          return (await res.json()) as AssistantConfig;
+        });
+        inFlightRef.current[activeAssistantId] = promise;
+        const data = await promise;
+        if (!cancelled && loadId === loadIdRef.current) {
           setAssistantConfig(data);
+          cacheConfig(activeAssistantId, data);
         }
       } catch (err) {
         console.error("Failed to load assistant config:", err);
-        if (!cancelled) {
+        if (!cancelled && loadId === loadIdRef.current) {
           setAssistantConfigError("Failed to load assistant configuration.");
         }
       } finally {
-        if (!cancelled) {
+        if (!cancelled && loadId === loadIdRef.current) {
           setAssistantConfigLoading(false);
         }
+        delete inFlightRef.current[activeAssistantId];
       }
     }
     void loadConfig();
@@ -185,6 +239,29 @@ export function AssistantsEditorPanel({
             }
           : prev
       );
+      setConfigCache((prev) =>
+        prev[activeAssistantId]
+          ? {
+              ...prev,
+              [activeAssistantId]: {
+                ...prev[activeAssistantId],
+                instructions: prev[activeAssistantId].instructions.map((inst) => {
+                  const u = updates.find((x) => x.id === inst.id);
+                  return u
+                    ? {
+                        ...inst,
+                        enabled: u.enabled,
+                        sortOrder:
+                          typeof u.sortOrder === "number"
+                            ? u.sortOrder
+                            : inst.sortOrder,
+                      }
+                    : inst;
+                }),
+              },
+            }
+          : prev
+      );
     } finally {
       setAssistantConfigSaving(false);
     }
@@ -216,6 +293,20 @@ export function AssistantsEditorPanel({
                 const u = updates.find((x) => x.id === tool.id);
                 return u ? { ...tool, enabled: u.enabled } : tool;
               }),
+            }
+          : prev
+      );
+      setConfigCache((prev) =>
+        prev[activeAssistantId]
+          ? {
+              ...prev,
+              [activeAssistantId]: {
+                ...prev[activeAssistantId],
+                tools: prev[activeAssistantId].tools.map((tool) => {
+                  const u = updates.find((x) => x.id === tool.id);
+                  return u ? { ...tool, enabled: u.enabled } : tool;
+                }),
+              },
             }
           : prev
       );
@@ -253,6 +344,20 @@ export function AssistantsEditorPanel({
                 const u = updates.find((x) => x.id === rule.id);
                 return u ? { ...rule, enabled: u.enabled } : rule;
               }),
+            }
+          : prev
+      );
+      setConfigCache((prev) =>
+        prev[activeAssistantId]
+          ? {
+              ...prev,
+              [activeAssistantId]: {
+                ...prev[activeAssistantId],
+                sanitize: prev[activeAssistantId].sanitize.map((rule) => {
+                  const u = updates.find((x) => x.id === rule.id);
+                  return u ? { ...rule, enabled: u.enabled } : rule;
+                }),
+              },
             }
           : prev
       );
@@ -300,6 +405,21 @@ export function AssistantsEditorPanel({
         assistants.map((a) =>
           a.id === activeAssistantId ? { ...a, name: trimmedName } : a
         )
+      );
+      setConfigCache((prev) =>
+        prev[activeAssistantId]
+          ? {
+              ...prev,
+              [activeAssistantId]: {
+                ...prev[activeAssistantId],
+                assistant: {
+                  ...prev[activeAssistantId].assistant,
+                  name: trimmedName,
+                  description: assistantFormDescription || null,
+                },
+              },
+            }
+          : prev
       );
     } catch (err) {
       console.error("Failed to update assistant:", err);
@@ -466,37 +586,45 @@ export function AssistantsEditorPanel({
         </div>
 
         <div
-          className={`flex flex-1 flex-col text-sm relative overflow-hidden border-t pt-4 md:pt-0 md:border-t-0 md:border-l md:pl-4 ${
+          className={`flex flex-1 flex-col text-sm relative overflow-hidden border-t pt-4 md:pt-0 md:border-t-0 md:border-l md:pl-4 min-h-[520px] ${
             isDark
               ? "border-neutral-700 bg-neutral-800"
               : "border-zinc-200 bg-white"
           }`}
         >
-          {activeAssistantId && assistantConfig && (
-            <AssistantConfigPanel
-              isDark={isDark}
-              assistantConfig={assistantConfig}
-              loading={assistantConfigLoading}
-              error={assistantConfigError}
-              saving={assistantConfigSaving}
-              assistantFormName={assistantFormName}
-              assistantFormDescription={assistantFormDescription}
-              onChangeName={setAssistantFormName}
-              onChangeDescription={setAssistantFormDescription}
-              onSaveBasics={saveAssistantBasics}
-              updateInstructions={updateAssistantInstructions}
-              updateTools={updateAssistantTools}
-              updateSanitize={updateAssistantSanitize}
-              setAssistantConfig={setAssistantConfig}
-              activeAssistantId={activeAssistantId}
-              currentUserId={currentUserId}
-              onDeleteAssistant={(assistantId) => {
-                setPendingDeleteAssistantId(assistantId);
-                setShowDeleteAssistantDialog(true);
-              }}
-            />
-          )}
-          {!activeAssistantId && (
+          {activeAssistantId ? (
+            assistantConfig ? (
+              <AssistantSettingsPanel
+                isDark={isDark}
+                assistantConfig={assistantConfig}
+                loading={assistantConfigLoading}
+                error={assistantConfigError}
+                saving={assistantConfigSaving}
+                assistantFormName={assistantFormName}
+                assistantFormDescription={assistantFormDescription}
+                onChangeName={setAssistantFormName}
+                onChangeDescription={setAssistantFormDescription}
+                onSaveBasics={saveAssistantBasics}
+                updateInstructions={updateAssistantInstructions}
+                updateTools={updateAssistantTools}
+                updateSanitize={updateAssistantSanitize}
+                setAssistantConfig={setAssistantConfig}
+                activeAssistantId={activeAssistantId}
+                currentUserId={currentUserId}
+                onDeleteAssistant={(assistantId) => {
+                  setPendingDeleteAssistantId(assistantId);
+                  setShowDeleteAssistantDialog(true);
+                }}
+              />
+            ) : (
+              <div className="relative flex flex-1 items-center justify-center p-8 text-sm text-zinc-500 dark:text-zinc-400">
+                <div className="flex items-center gap-2 rounded-full px-3 py-2 bg-white/70 text-zinc-700 shadow-sm dark:bg-neutral-800/70 dark:text-zinc-200">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>{t("common.loading", "Loading…")}</span>
+                </div>
+              </div>
+            )
+          ) : (
             <div className="flex flex-1 items-center justify-center p-8 text-sm text-zinc-500 dark:text-zinc-400">
               <div className="flex flex-col items-center gap-2 text-center">
                 <Wand2 className="h-6 w-6" />
@@ -557,3 +685,5 @@ export function AssistantsEditorPanel({
     </div>
   );
 }
+
+export default AssistantsManager;

@@ -1,8 +1,10 @@
 @import "tailwindcss";
 
 :root {
+  /* Light theme tokens */
   --background: #ffffff;
-  --foreground: #171717;
+  --foreground: #0f172a;
+  --color-border-soft: rgba(0, 0, 0, 0.08);
   --color-canvas-from: #020617;
   --color-canvas-via: #0f172a;
   --color-canvas-to: #020617;
@@ -45,8 +47,10 @@ body {
 }
 
 html.dark {
-  --background: #0a0a0a;
-  --foreground: #ededed;
+  /* Match the app shell dark tone */
+  --background: #262626;
+  --foreground: #e5e5e5;
+  --color-border-soft: rgba(255, 255, 255, 0.1);
 }
 
 /* Placeholder for future animated dots if needed */

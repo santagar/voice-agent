@@ -44,7 +44,7 @@ export function Header({
   const router = useRouter();
 
   if (callActive) {
-    // El header se oculta durante la llamada (comportamiento actual).
+    // header will be hidden during the call (current behavior).
     return null;
   }
 

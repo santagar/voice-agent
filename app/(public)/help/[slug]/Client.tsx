@@ -145,28 +145,43 @@ function extractHeadings(markdown: string): Heading[] {
 }
 
 export function Client({ markdown, updatedAt, titleOverride, mdUrl }: ArticleClientProps) {
-  const { locale, setLocale } = useLocale();
+  const { locale, setLocale, t } = useLocale();
   const { theme } = useTheme();
   const router = useRouter();
   const didMountRef = React.useRef(false);
   const isDark = theme === "dark";
-  const sharedBackground = isDark ? "bg-neutral-900/80" : "bg-white/80";
-  const pageBackground = `${sharedBackground} ${isDark ? "text-zinc-100" : "text-gray-900"}`;
-  const mutedText = isDark ? "text-zinc-400" : "text-gray-600";
-  const bodyText = isDark ? "text-zinc-200" : "text-gray-800";
+  const sharedBackground = "";
+  const pageBackground = `${isDark ? "text-slate-100" : "text-slate-900"}`;
+  const mutedText = isDark ? "text-zinc-400" : "text-slate-600";
+  const bodyText = isDark ? "text-slate-200" : "text-slate-800";
   const navLink = isDark
     ? "text-zinc-100 hover:bg-white/10"
     : "text-gray-800 hover:bg-zinc-100";
   const pillButton = isDark
     ? "text-zinc-100 hover:bg-white/10"
     : "text-gray-700 hover:bg-zinc-100";
-  const codeBlock = "border-white/10 bg-neutral-800 text-zinc-100";
-  const inlineCode = "bg-neutral-800 text-zinc-100";
+  const codeBlock = isDark
+    ? "border-white/10 bg-neutral-900 text-zinc-100"
+    : "border-white/10 bg-neutral-800 text-zinc-100";
+  const inlineCode = isDark
+    ? "bg-neutral-900 text-zinc-100"
+    : "bg-neutral-800 text-zinc-100";
 
   const [headings, setHeadings] = React.useState<Heading[]>(() => extractHeadings(markdown));
   const [activeHash, setActiveHash] = React.useState<string | null>(null);
 
-  const heroTitle = titleOverride || headings.find((h) => h.level === 1)?.text || "Help";
+  const heroTitle =
+    titleOverride || headings.find((h) => h.level === 1)?.text || t("help.title");
+  const strings = React.useMemo(
+    () => ({
+      viewMarkdown: t("help.viewMarkdown"),
+      help: t("help.breadcrumb.help"),
+      copy: t("help.copy"),
+      copied: t("help.copied"),
+      article: t("help.article"),
+    }),
+    [t]
+  );
 
   const formatDate = React.useCallback(
     (date: Date) =>
@@ -332,10 +347,10 @@ export function Client({ markdown, updatedAt, titleOverride, mdUrl }: ArticleCli
                   ? "border-white/15 bg-neutral-800 text-zinc-100 hover:bg-neutral-700"
                   : "border-black/10 bg-white text-gray-900 hover:bg-zinc-50"
               }`}
-              aria-label={copied ? "Copied" : "Copy code"}
+              aria-label={copied ? strings.copied : strings.copy}
             >
               <Copy className="h-3.5 w-3.5" />
-              {copied ? "Copied" : "Copy"}
+              {copied ? strings.copied : strings.copy}
             </button>
           </div>
         );
@@ -348,7 +363,10 @@ export function Client({ markdown, updatedAt, titleOverride, mdUrl }: ArticleCli
   const lastUpdatedDate = updatedAt ? new Date(updatedAt) : null;
 
   return (
-    <main className={`min-h-screen ${pageBackground}`}>
+    <main
+      className={`min-h-screen ${pageBackground}`}
+      style={{ background: "var(--background)", color: "var(--foreground)" }}
+    >
       <Header title="Help" subtitle="" />
 
       <div className="mx-auto max-w-5xl px-5 pt-10 sm:px-6 lg:px-8">
@@ -371,7 +389,7 @@ export function Client({ markdown, updatedAt, titleOverride, mdUrl }: ArticleCli
                   }`}
                 >
                   <FileText className="h-4 w-4" />
-                  View as Markdown
+                  {strings.viewMarkdown}
                 </a>
               </div>
             ) : null}
@@ -382,13 +400,18 @@ export function Client({ markdown, updatedAt, titleOverride, mdUrl }: ArticleCli
       <div className="mx-auto flex max-w-6xl gap-6 px-5 pb-16 pt-20 sm:px-6 lg:gap-8 lg:px-8">
         <aside className="hidden w-56 shrink-0 lg:block">
           <div className="sticky top-32 space-y-4">
-            <nav className="mb-4 flex items-center gap-2 text-sm text-slate-900 dark:text-zinc-100">
-              <a href="/help" className={`hover:underline ${mutedText}`}>
-                Help
+            <nav className="mb-4 flex items-center gap-2 text-sm">
+              <a
+                href="/help"
+                className={`hover:underline ${
+                  isDark ? "text-zinc-300" : "text-slate-600"
+                }`}
+              >
+                {strings.help}
               </a>
-              <span className={mutedText}>/</span>
-              <span className="font-semibold">
-                {heroTitle || "Article"}
+              <span className={isDark ? "text-zinc-400" : "text-slate-500"}>/</span>
+              <span className={isDark ? "text-white" : "text-slate-900"}>
+                {heroTitle || strings.article}
               </span>
             </nav>
             <div>{/* spacer for potential intro */}</div>
@@ -411,13 +434,18 @@ export function Client({ markdown, updatedAt, titleOverride, mdUrl }: ArticleCli
         </aside>
 
         <div className="flex-1 max-w-3xl w-full mx-auto px-1 sm:px-0">
-          <nav className="mb-6 flex items-center gap-2 text-sm pl-1 sm:pl-0 lg:hidden text-slate-900 dark:text-zinc-100">
-            <a href="/help" className={`hover:underline ${mutedText}`}>
-              Help
+          <nav className="mb-6 flex items-center gap-2 text-sm pl-1 sm:pl-0 lg:hidden">
+            <a
+              href="/help"
+              className={`hover:underline ${
+                isDark ? "text-zinc-300" : "text-slate-600"
+              }`}
+            >
+              {strings.help}
             </a>
-            <span className={mutedText}>/</span>
-            <span className="font-semibold">
-              {heroTitle || "Article"}
+            <span className={isDark ? "text-zinc-400" : "text-slate-500"}>/</span>
+            <span className={isDark ? "text-white" : "text-slate-900"}>
+              {heroTitle || strings.article}
             </span>
           </nav>
 

@@ -1,4 +1,4 @@
-import MainClientPage from "../../../main/Client";
+import MainClient from "../../../main/Client";
 import { getInitialUserPreferences } from "@/lib/server/userPreferences";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth/options";
@@ -127,7 +127,7 @@ export default async function AssistantEditorWithId({ params }: PageProps) {
   });
 
   return (
-    <MainClientPage
+    <MainClient
       initialSidebarCollapsed={initialSidebarCollapsed}
       initialLoggedIn={!!session}
       initialUserEmail={session?.user?.email ?? null}

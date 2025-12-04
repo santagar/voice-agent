@@ -1,16 +1,16 @@
-import MainClientPage from "./Client";
+import MainClient from "./Client";
 import { getInitialUserPreferences } from "@/lib/server/userPreferences";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth/options";
 import { prisma } from "@/lib/prisma";
 
-type ChatPageProps = {
+type PageProps = {
   searchParams?: Promise<{
     assistantId?: string;
   }>;
 };
 
-export default async function ChatPage({ searchParams }: ChatPageProps) {
+export default async function Page({ searchParams }: PageProps) {
   const resolvedSearchParams =
     searchParams !== undefined ? await searchParams : {};
   const { sidebarCollapsed: initialSidebarCollapsed } =
@@ -152,7 +152,7 @@ export default async function ChatPage({ searchParams }: ChatPageProps) {
   });
 
   return (
-    <MainClientPage
+    <MainClient
       initialSidebarCollapsed={initialSidebarCollapsed}
       initialLoggedIn={!!session}
       initialUserEmail={session?.user?.email ?? null}

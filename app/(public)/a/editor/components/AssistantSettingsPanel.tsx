@@ -65,7 +65,7 @@ export type AssistantConfig = {
   sanitize: AssistantConfigRule[];
 };
 
-type AssistantConfigPanelProps = {
+type AssistantSettingsPanelProps = {
   isDark: boolean;
   assistantConfig: AssistantConfig | null;
   loading: boolean;
@@ -94,7 +94,7 @@ function FullscreenPortal({ children }: { children: React.ReactNode }) {
   return createPortal(children, document.body);
 }
 
-export function AssistantConfigPanel({
+export function AssistantSettingsPanel({
   isDark,
   assistantConfig,
   loading,
@@ -112,7 +112,7 @@ export function AssistantConfigPanel({
   activeAssistantId,
   currentUserId,
   onDeleteAssistant,
-}: AssistantConfigPanelProps) {
+}: AssistantSettingsPanelProps) {
   const { t } = useLocale();
   const [showRulesModal, setShowRulesModal] = useState(false);
   const [showFunctionsJsonModal, setShowFunctionsJsonModal] =

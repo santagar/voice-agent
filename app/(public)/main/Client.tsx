@@ -61,11 +61,11 @@ import { Sidebar, ChatSummary, ChatSummaryMode } from "./components/Sidebar";
 import { Header } from "./components/Header";
 import { AssistantSummary } from "./components/AssistantSelector";
 import { ConfirmDialog } from "@/components/front/ui/ConfirmDialog";
-import { AssistantConfig } from "./components/AssistantConfigPanel";
+import { AssistantConfig } from "../a/editor/components/AssistantSettingsPanel";
 import {
-  AssistantsEditorPanel,
+  AssistantsManager,
   EditorAssistantSummary,
-} from "./components/AssistantsEditorPanel";
+} from "../a/editor/components/AssistantsManager";
 
 const START_CALL_PROMPT =
   "Arranca una conversación de voz amable y breve en español. Presentate y pregunta en qué puedes ayudar.";
@@ -85,7 +85,7 @@ type MainClientProps = {
   initialViewMode?: "chat" | "assistant-editor";
 };
 
-export default function MainClientPage({
+export default function MainClient({
   initialSidebarCollapsed,
   initialLoggedIn = false,
   initialUserEmail = null,
@@ -483,7 +483,7 @@ export default function MainClientPage({
     return () => {
       cancelled = true;
     };
-  }, [activeAssistantId]);
+  }, [activeAssistantId, viewMode]);
 
   async function handleSendText() {
     const trimmed = input.trim();
@@ -1598,7 +1598,7 @@ export default function MainClientPage({
             }`}
           >
             {viewMode === "assistant-editor" && (
-              <AssistantsEditorPanel
+              <AssistantsManager
                 isDark={isDark}
                 t={t}
                 currentUserId={currentUserId ?? null}

@@ -1,4 +1,4 @@
-import MainClientPage from "../../main/Client";
+import MainClient from "../../main/Client";
 import { getInitialUserPreferences } from "@/lib/server/userPreferences";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth/options";
@@ -137,7 +137,7 @@ export default async function ChatByIdPage({ params }: ChatByIdPageProps) {
   });
 
   return (
-    <MainClientPage
+    <MainClient
       initialSidebarCollapsed={initialSidebarCollapsed}
       workspaceId={workspaceId}
       assistantId={assistantId}

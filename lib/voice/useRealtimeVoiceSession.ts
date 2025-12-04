@@ -899,14 +899,25 @@ export function useRealtimeVoiceSession(
 
       ws.onerror = (err) => {
         if (didUnmount) return;
+        const message =
+          err instanceof ErrorEvent
+            ? err.message
+            : typeof err === "object" && err && "message" in err
+            ? // @ts-expect-error: best-effort message extraction
+              err.message
+            : "";
         // On initial connection failures, log a warning and let the
         // reconnect logic handle it silently. Only surface an error
         // in the chat if the socket was previously connected.
         if (wsConnectedRef.current) {
-          console.error("WS error:", err);
-          pushSystem("WebSocket error, check console", "error");
+          if (message) {
+            console.error("WS error:", message);
+            pushSystem(`WebSocket error: ${message}`, "error");
+          } else {
+            console.warn("WS error (no details)");
+          }
         } else {
-          console.warn("WS connection failed, will retry…", err);
+          console.warn("WS connection failed, will retry…", message || err);
         }
         try {
           ws.close();

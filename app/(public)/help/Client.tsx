@@ -20,7 +20,7 @@ type ClientProps = {
 };
 
 export function Client({ articles }: ClientProps) {
-  const { locale, setLocale } = useLocale();
+  const { locale, setLocale, t } = useLocale();
   const { theme } = useTheme();
   const isDark = theme === "dark";
 
@@ -40,15 +40,13 @@ export function Client({ articles }: ClientProps) {
       .sort((a, b) => a.title.localeCompare(b.title));
   }, [articles, locale, query]);
 
-  const pageBackground = isDark
-    ? "bg-neutral-900 text-zinc-100"
-    : "bg-white text-slate-900";
-  const mutedText = isDark ? "text-zinc-400" : "text-slate-600";
-  const cardBg = isDark ? "bg-neutral-900" : "bg-white";
-  const cardBorder = isDark ? "border-white/10" : "border-slate-200";
+  const mutedText = isDark ? "text-zinc-300" : "text-slate-600";
 
   return (
-    <main className={`min-h-screen ${pageBackground}`}>
+    <main
+      className="min-h-screen"
+      style={{ background: "var(--background)", color: "var(--foreground)" }}
+    >
       <Header
         title="Help"
         subtitle=""
@@ -70,14 +68,18 @@ export function Client({ articles }: ClientProps) {
               type="search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search for articles..."
-              className="w-full bg-transparent text-lg outline-none appearance-none placeholder:text-slate-500 dark:placeholder:text-zinc-500 text-slate-900 dark:text-white [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden"
+              placeholder={t("help.search.placeholder")}
+              className={`w-full bg-transparent text-lg font-medium outline-none appearance-none ${
+                isDark
+                  ? "text-white placeholder:text-zinc-500"
+                  : "text-slate-900 placeholder:text-slate-700"
+              } [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden`}
             />
             {query ? (
               <button
                 type="button"
                 onClick={() => setQuery("")}
-                aria-label="Clear search"
+                aria-label={t("help.search.clear")}
                 className={`flex h-7 w-7 items-center justify-center rounded-full transition ${
                   isDark ? "text-zinc-300 hover:bg-white/10" : "text-slate-600 hover:bg-slate-200"
                 }`}
@@ -93,13 +95,19 @@ export function Client({ articles }: ClientProps) {
             <Link
               key={`${article.locale}-${article.slug}`}
               href={`/help/${article.slug}`}
-              className={`block rounded-2xl border ${cardBorder} ${cardBg} px-5 py-4 transition ${
-                isDark ? "hover:bg-neutral-800" : "hover:bg-slate-50"
+              className={`block rounded-2xl border px-5 py-4 transition ${
+                isDark
+                  ? "border-white/10 bg-neutral-800 hover:bg-neutral-700"
+                  : "border-slate-200 bg-white hover:bg-slate-50"
               }`}
             >
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="truncate text-base font-semibold text-slate-900 dark:text-white">
+                  <p
+                    className={`truncate text-base font-semibold ${
+                      isDark ? "text-white" : "text-slate-900"
+                    }`}
+                  >
                     {article.title}
                   </p>
                   {article.summary ? (
@@ -114,9 +122,13 @@ export function Client({ articles }: ClientProps) {
           ))}
           {filtered.length === 0 && (
             <div
-              className={`rounded-2xl border ${cardBorder} ${cardBg} px-5 py-6 text-sm ${mutedText}`}
+              className={`rounded-2xl border px-5 py-6 text-sm ${mutedText} ${
+                isDark
+                  ? "border-white/10 bg-neutral-800"
+                  : "border-slate-200 bg-white"
+              }`}
             >
-              No articles found for this language.
+              {t("help.empty")}
             </div>
           )}
         </div>
