@@ -9,7 +9,13 @@ declare module "ws" {
 
   export class WebSocketServer {
     constructor(options: { port: number }, callback?: () => void);
-    on(event: "connection", listener: (socket: WebSocket) => void): void;
+    on(
+      event: "connection",
+      listener: (
+        socket: WebSocket,
+        request: import("http").IncomingMessage
+      ) => void
+    ): void;
+    on(event: string, listener: (...args: any[]) => void): void;
   }
 }
-

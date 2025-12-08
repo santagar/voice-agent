@@ -45,9 +45,10 @@ export async function GET(_req: Request, { params }: Params) {
         sequence: m.sequence,
         createdAt: m.createdAt.toISOString(),
         toolCallId: m.toolCallId,
+        meta: m.meta,
       })),
     });
-  } catch (err: any) {
+  } catch (err) {
     console.error("Failed to load conversation by id:", err);
     return NextResponse.json(
       { error: "Failed to load conversation" },
@@ -116,7 +117,7 @@ export async function PATCH(req: Request, { params }: Params) {
       { error: "Unsupported action" },
       { status: 400 }
     );
-  } catch (err: any) {
+  } catch (err) {
     console.error("Failed to update conversation:", err);
     return NextResponse.json(
       { error: "Failed to update conversation" },
@@ -136,7 +137,7 @@ export async function DELETE(_req: Request, { params }: Params) {
     });
 
     return new NextResponse(null, { status: 204 });
-  } catch (err: any) {
+  } catch (err) {
     console.error("Failed to delete conversation:", err);
     return NextResponse.json(
       { error: "Failed to delete conversation" },

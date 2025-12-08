@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Ellipsis, HelpCircle, Menu } from "lucide-react";
+import { Archive, ArrowLeft, Bug, Ellipsis, HelpCircle, Menu, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { IconButton } from "@/components/front/ui/IconButton";
 import { Tooltip } from "@/components/front/ui/Tooltip";
@@ -12,14 +12,24 @@ type HeaderProps = {
   wsConnected: boolean;
   callStatus: "idle" | "calling" | "in_call";
   loggedIn: boolean;
+  isAdminUser: boolean;
   assistantHasConfig?: boolean;
   showMenu: boolean;
   onToggleMenu: () => void;
+  onCloseMenu: () => void;
   onToggleMobileSidebar: () => void;
   onOpenLogin: () => void;
   assistants: AssistantSummary[];
   activeAssistantId: string | null;
   onChangeAssistant: (id: string) => void;
+  viewMode: "chat" | "assistant-editor";
+  isChatView: boolean;
+  hasActiveConversation: boolean;
+  onBackToChat: () => void;
+  onArchiveConversation: () => void;
+  onRequestDeleteConversation: () => void;
+  showDebug: boolean;
+  onToggleDebug: () => void;
   assistantSelectorDisabled?: boolean;
   t: (key: string) => string;
 };
@@ -29,28 +39,35 @@ export function Header({
   wsConnected,
   callStatus,
   loggedIn,
+  isAdminUser,
   assistantHasConfig,
   showMenu,
   onToggleMenu,
+  onCloseMenu,
   onToggleMobileSidebar,
   onOpenLogin,
   assistants,
   activeAssistantId,
   onChangeAssistant,
+  viewMode,
+  isChatView,
+  hasActiveConversation,
+  onBackToChat,
+  onArchiveConversation,
+  onRequestDeleteConversation,
+  showDebug,
+  onToggleDebug,
   assistantSelectorDisabled,
   t,
 }: HeaderProps) {
   const callActive = callStatus === "calling" || callStatus === "in_call";
   const router = useRouter();
 
-  if (callActive) {
-    // header will be hidden during the call (current behavior).
-    return null;
-  }
+  const visibilityClass = callActive ? "hidden md:flex" : "flex";
 
   return (
     <header
-      className={`sticky top-0 z-20 flex h-14 flex-wrap items-center justify-between gap-2 border-b px-3 md:flex border-none`}
+      className={`sticky top-0 z-20 h-14 flex-wrap items-center justify-between gap-2 border-b px-3 border-none md:flex ${visibilityClass}`}
     >
       <div className="flex items-center gap-1.5">
         <IconButton
@@ -93,6 +110,116 @@ export function Header({
           </div>
         </div>
       </div>
+
+      {loggedIn && showMenu && (isChatView || viewMode === "assistant-editor" || isAdminUser) && (
+        <>
+          <div
+            className="fixed inset-0 z-20"
+            onClick={onCloseMenu}
+            aria-hidden
+          />
+          <div
+            className={`absolute right-4 top-14 z-40 w-48 rounded-xl border shadow-lg backdrop-blur-sm ${
+              isDark
+                ? "border-white/10 bg-neutral-800/95"
+                : "border-zinc-200 bg-white"
+            }`}
+          >
+            {viewMode === "assistant-editor" && (
+              <div className="px-1 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onBackToChat();
+                    onCloseMenu();
+                    router.push("/");
+                  }}
+                  className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-[15px] cursor-pointer ${
+                    isDark
+                      ? "text-slate-100 hover:bg-white/10"
+                      : "text-slate-800 hover:bg-zinc-50"
+                  }`}
+                >
+                  <ArrowLeft className="h-3.5 w-3.5" />
+                  <span className="flex-1 text-left">
+                    {t("chat.menu.backToChat")}
+                  </span>
+                </button>
+              </div>
+            )}
+            {isChatView && hasActiveConversation && (
+              <>
+                <div className="px-1 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onArchiveConversation();
+                      onCloseMenu();
+                    }}
+                    className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-[15px] cursor-pointer ${
+                      isDark
+                        ? "text-slate-100 hover:bg-white/10"
+                        : "text-slate-800 hover:bg-zinc-50"
+                    }`}
+                  >
+                    <Archive className="h-3.5 w-3.5" />
+                    <span className="flex-1 text-left">
+                      {t("chat.menu.archive")}
+                    </span>
+                  </button>
+                </div>
+                <div className="px-1 pb-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onCloseMenu();
+                      onRequestDeleteConversation();
+                    }}
+                    className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-[15px] cursor-pointer ${
+                      isDark
+                        ? "text-red-300 hover:bg-red-500/10"
+                        : "text-red-600 hover:bg-red-50"
+                    }`}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    <span className="flex-1 text-left">
+                      {t("chat.menu.delete")}
+                    </span>
+                  </button>
+                </div>
+                {isAdminUser && (
+                  <div
+                    className={`mx-3 my-1 h-px ${
+                      isDark ? "bg-white/10" : "bg-zinc-200"
+                    }`}
+                  />
+                )}
+              </>
+            )}
+            <div className="px-1 pb-1">
+              {isAdminUser && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onToggleDebug();
+                    onCloseMenu();
+                  }}
+                  className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-[15px] cursor-pointer ${
+                    isDark
+                      ? "text-slate-100 hover:bg-white/10"
+                      : "text-slate-800 hover:bg-zinc-50"
+                  }`}
+                >
+                  <Bug className="h-3.5 w-3.5 text-sky-300" />
+                  <span className="flex-1 text-left">
+                    {t("chat.menu.debug")} {showDebug ? "(on)" : "(off)"}
+                  </span>
+                </button>
+              )}
+            </div>
+          </div>
+        </>
+      )}
 
       <div className="flex items-center gap-2">
         {loggedIn ? (

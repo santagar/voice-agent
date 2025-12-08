@@ -1,26 +1,36 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useApiSessions } from "./useApiSessions";
+import { useApiScopes, ScopeDefinition } from "./useApiScopes";
+import { useApiTranscribe } from "./useApiTranscribe";
+import { useApiVoiceIntent } from "./useApiVoiceIntent";
 
 export type VoiceMessage = {
   id: string;
   from: "user" | "assistant" | "system";
   text: string;
-  meta?: string;
+  meta?: Record<string, unknown> | string | null;
 };
 
 export type CallStatus = "idle" | "calling" | "in_call";
 
-export type ScopeDefinition = {
-  name: string;
-  keywords: string[];
-};
-
-type UseRealtimeVoiceSessionOptions = {
+type UseRealtimeSessionOptions = {
   startCallPrompt?: string;
   initialScope?: string;
   wsUrl?: string;
+  sessionId?: string | null;
+  autoConnect?: boolean;
   // Called whenever the Realtime API finishes an assistant turn and we
   // have a stable transcript for that reply. Useful for persistence.
   onAssistantTurnFinal?: (text: string) => void;
+  // Called when a user voice utterance is transcribed to text.
+  onUserTranscriptFinal?: (text: string) => void;
+  // Called when a voice utterance placeholder ("…") is created.
+  onUserUtteranceStarted?: () => void;
+  // Called when a voice utterance finishes processing (final transcript or dropped).
+  onUserUtteranceFinished?: () => void;
+  // Called when the WS session is closed (by user or idle timeout) so the caller can
+  // persist the session status.
+  onSessionClosed?: (status: "closed" | "expired") => void;
 };
 
 const ASSISTANT_PLAYBACK_RATE =
@@ -56,6 +66,9 @@ const BARGE_IN_MIN_MS = Number(
 const USE_VOICE_TRANSCRIBE =
   process.env.NEXT_PUBLIC_USE_VOICE_TRANSCRIBE !== "false";
 
+// Time maximum of inactivity (no messages or audio) before closing the WS.
+const IDLE_TIMEOUT_MS = 2 * 60 * 1000;
+
 // Minimum number of PCM16 samples required to treat a detected
 // voice segment as a real utterance to transcribe. At 24kHz,
 // 2400 samples ≈ 100ms of audio.
@@ -63,15 +76,20 @@ const MIN_UTTERANCE_SAMPLES = 2400;
 
 const DEFAULT_SCOPE_RULES: ScopeDefinition[] = [];
 
-export function useRealtimeVoiceSession(
-  options: UseRealtimeVoiceSessionOptions = {}
+export function useRealtimeSession(
+  options: UseRealtimeSessionOptions = {}
 ) {
   const {
     startCallPrompt = "",
     initialScope = "support",
     wsUrl = "ws://localhost:4001",
+    sessionId = null,
+    autoConnect = true,
     onAssistantTurnFinal,
+    onUserTranscriptFinal,
+    onSessionClosed,
   } = options;
+  const { onUserUtteranceStarted, onUserUtteranceFinished } = options;
 
   const [messages, setMessages] = useState<VoiceMessage[]>([]);
   const [input, setInput] = useState("");
@@ -83,7 +101,9 @@ export function useRealtimeVoiceSession(
   const [muted, setMuted] = useState(false);
   const [micMuted, setMicMuted] = useState(false);
   const [scopes, setScopes] = useState<ScopeDefinition[]>([]);
+  const scopesLoadedRef = useRef(false);
   const [currentScope, setCurrentScope] = useState<string>(initialScope);
+  const [bridgeConnections, setBridgeConnections] = useState<number | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -110,6 +130,13 @@ export function useRealtimeVoiceSession(
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const currentAssistantTextRef = useRef("");
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const audioOutputActiveRef = useRef(false);
+  const connectingRef = useRef(false);
+  const pendingConnectionRef = useRef<Promise<boolean> | null>(null);
+  const closingForIdleRef = useRef(false);
+  const sessionClosedNotifiedRef = useRef(false);
+  const idleTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastActivityRef = useRef<number | null>(null);
   const assistantPlaceholderRef = useRef(false);
   const pendingAssistantTextRef = useRef<string | null>(null);
   const dropAssistantResponsesRef = useRef(false);
@@ -117,20 +144,66 @@ export function useRealtimeVoiceSession(
   const introPromptTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastUserTurnAtRef = useRef<number | null>(null);
+  const lastSessionIdRef = useRef<string | null>(null);
   const wsConnectedRef = useRef(false);
+  const didUnmountRef = useRef(false);
+  const { updateSession } = useApiSessions();
+  const { transcribe } = useApiTranscribe();
+  const { classifyIntent } = useApiVoiceIntent();
+  const { listScopes, detectScope } = useApiScopes();
   const onAssistantTurnFinalRef = useRef<
     ((text: string) => void) | undefined
   >(onAssistantTurnFinal);
+  const onUserTranscriptFinalRef = useRef<
+    ((text: string) => void) | undefined
+  >(onUserTranscriptFinal);
+  const onUserUtteranceStartedRef = useRef<
+    (() => void) | undefined
+  >(onUserUtteranceStarted);
+  const onUserUtteranceFinishedRef = useRef<
+    (() => void) | undefined
+  >(onUserUtteranceFinished);
+
+  async function persistSessionStatus(status: "closed" | "expired") {
+    if (sessionClosedNotifiedRef.current) return;
+    sessionClosedNotifiedRef.current = true;
+    if (sessionId) {
+      try {
+        await updateSession(sessionId, { status });
+      } catch (err) {
+        console.error("Failed to persist session status:", err);
+      }
+    }
+    if (onSessionClosed) {
+      try {
+        onSessionClosed(status);
+      } catch (err) {
+        console.error("onSessionClosed callback failed:", err);
+      }
+    }
+  }
 
   useEffect(() => {
     onAssistantTurnFinalRef.current = onAssistantTurnFinal;
   }, [onAssistantTurnFinal]);
 
+  useEffect(() => {
+    onUserTranscriptFinalRef.current = onUserTranscriptFinal;
+  }, [onUserTranscriptFinal]);
+
+  useEffect(() => {
+    onUserUtteranceStartedRef.current = onUserUtteranceStarted;
+  }, [onUserUtteranceStarted]);
+
+  useEffect(() => {
+    onUserUtteranceFinishedRef.current = onUserUtteranceFinished;
+  }, [onUserUtteranceFinished]);
+
   const scopeCatalog = useMemo(() => {
     const merged = new Map<string, Set<string>>();
     DEFAULT_SCOPE_RULES.forEach((scope) => {
       const keywords = new Set<string>(
-        scope.keywords.map((kw) => kw.toLowerCase())
+        (scope.keywords || []).map((kw) => kw.toLowerCase())
       );
       keywords.add(scope.name.toLowerCase());
       merged.set(scope.name, keywords);
@@ -182,27 +255,38 @@ export function useRealtimeVoiceSession(
   }, [wsConnected]);
 
   useEffect(() => {
+    if (scopesLoadedRef.current) return;
+    scopesLoadedRef.current = true;
     async function loadScopes() {
       try {
-        const res = await fetch("/api/scopes");
-        const data = await res.json();
-        if (Array.isArray(data.scopes)) {
-          setScopes(
-            data.scopes.map((scope: ScopeDefinition) => ({
-              name: scope.name,
-              keywords: scope.keywords || [],
-            }))
-          );
-        }
+        const apiScopes = await listScopes();
+        setScopes(
+          apiScopes.map((scope) => ({
+            name: scope.name,
+            keywords: scope.keywords || [],
+          }))
+        );
       } catch (err) {
         console.warn("Failed to load scopes:", err);
       }
     }
-    loadScopes();
-  }, []);
+    void loadScopes();
+  }, [listScopes]);
 
   useEffect(() => {
+    // Reset flags on mount so subsequent remounts can reconnect correctly.
+    didUnmountRef.current = false;
+    closingForIdleRef.current = false;
+    sessionClosedNotifiedRef.current = false;
+
     return () => {
+      didUnmountRef.current = true;
+      pendingConnectionRef.current = null;
+      connectingRef.current = false;
+      if (idleTimeoutRef.current) {
+        clearTimeout(idleTimeoutRef.current);
+        idleTimeoutRef.current = null;
+      }
       if (introPromptTimeoutRef.current) {
         clearTimeout(introPromptTimeoutRef.current);
       }
@@ -210,7 +294,15 @@ export function useRealtimeVoiceSession(
         clearTimeout(reconnectTimeoutRef.current);
       }
       if (wsRef.current) {
-        wsRef.current.close();
+        // Evita cerrar un socket en estado CONNECTING para no disparar
+        // errores "closed before the connection was established".
+        if (wsRef.current.readyState === WebSocket.OPEN) {
+          try {
+            wsRef.current.close();
+          } catch {
+            // ignore
+          }
+        }
         wsRef.current = null;
       }
     };
@@ -254,6 +346,38 @@ export function useRealtimeVoiceSession(
       typingTimeoutRef.current = null;
     }
     assistantPlaceholderRef.current = false;
+  }
+
+  function scheduleIdleClose() {
+    if (idleTimeoutRef.current) {
+      clearTimeout(idleTimeoutRef.current);
+    }
+    if (inCallRef.current) return;
+    idleTimeoutRef.current = setTimeout(() => {
+      if (inCallRef.current) return;
+      if (
+        wsRef.current &&
+        wsRef.current.readyState === WebSocket.OPEN
+      ) {
+        closingForIdleRef.current = true;
+        try {
+          wsRef.current.close();
+        } catch {
+          // ignore
+        }
+        return;
+      }
+      // Without open socket: mark the session as expired anyway.
+      void persistSessionStatus("expired");
+    }, IDLE_TIMEOUT_MS);
+  }
+
+  function touchActivity() {
+    lastActivityRef.current =
+      typeof performance !== "undefined" && typeof performance.now === "function"
+        ? performance.now()
+        : Date.now();
+    scheduleIdleClose();
   }
 
   function startAssistantTyping(fullText: string, initialDelay = 350) {
@@ -346,6 +470,7 @@ export function useRealtimeVoiceSession(
     options?: { duringAssistant?: boolean }
   ) {
     try {
+      touchActivity();
       if (!inCallRef.current) return;
       const bytes = new Uint8Array(pcm16.buffer);
       let binary = "";
@@ -356,17 +481,7 @@ export function useRealtimeVoiceSession(
         typeof btoa === "function" ? btoa(binary) : "";
       if (!base64) return;
 
-      const res = await fetch("/api/transcribe", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ audio: base64 }),
-      });
-      if (!res.ok) {
-        console.warn("STT /api/transcribe error:", await res.text());
-        return;
-      }
-      const data = (await res.json()) as { text?: string };
-      const transcript = (data.text || "").trim();
+      const transcript = await transcribe(base64);
       if (!transcript || !inCallRef.current) {
         return;
       }
@@ -405,18 +520,9 @@ export function useRealtimeVoiceSession(
         !transcript.includes(" ") && transcript.length <= 12;
       if (USE_VOICE_TRANSCRIBE && (duringAssistant || isShortSingleWord)) {
         try {
-          const intentRes = await fetch("/api/voice-intent", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text: transcript }),
-          });
-          if (intentRes.ok) {
-            const intentJson = (await intentRes.json()) as {
-              decision?: string;
-            };
-            const decision = String(
-              intentJson.decision || ""
-            ).toUpperCase();
+          const decisionRaw = await classifyIntent(transcript);
+          if (decisionRaw) {
+            const decision = decisionRaw.toUpperCase();
 
             if (decision === "IGNORE") {
               // Drop this utterance entirely from the chat UI
@@ -475,42 +581,50 @@ export function useRealtimeVoiceSession(
 
       const nextScope = await autoDetectScope(transcript);
 
-      if (USE_VOICE_TRANSCRIBE) {
-        // Full voice+text mode: update or create the user bubble with
-        // the transcribed utterance.
-        if (messageId) {
-          setMessages((prev) => {
-            const updated = [...prev];
-            for (let i = updated.length - 1; i >= 0; i -= 1) {
-              if (updated[i].id === messageId) {
-                updated[i] = { ...updated[i], text: transcript };
-                return updated;
-              }
+      // Always render the user's transcription as a bubble
+      // (marked with meta "voice") so it is visible in the chat,
+      // regardless of USE_VOICE_TRANSCRIBE.
+      if (messageId) {
+        setMessages((prev) => {
+          const updated = [...prev];
+          for (let i = updated.length - 1; i >= 0; i -= 1) {
+            if (updated[i].id === messageId) {
+              updated[i] = { ...updated[i], text: transcript, meta: "voice" };
+              return updated;
             }
-            return [
-              ...updated,
-              { id: crypto.randomUUID(), from: "user", text: transcript },
-            ];
-          });
-        } else {
-          setMessages((prev) => [
-            ...prev,
-            { id: crypto.randomUUID(), from: "user", text: transcript },
-          ]);
-        }
-      } else if (messageId) {
-        // Pure voice mode: remove the breathing-dot placeholder but do
-        // not create a text bubble for the user utterance. Scope still
-        // gets updated from STT above.
-        setMessages((prev) =>
-          prev.filter((msg) => msg.id !== messageId)
-        );
+          }
+          return [
+            ...updated,
+            {
+              id: crypto.randomUUID(),
+              from: "user",
+              text: transcript,
+              meta: "voice",
+            },
+          ];
+        });
+      } else {
+        setMessages((prev) => [
+          ...prev,
+          { id: crypto.randomUUID(), from: "user", text: transcript, meta: "voice" },
+        ]);
+      }
+      touchActivity();
+
+      if (onUserTranscriptFinalRef.current) {
+        await onUserTranscriptFinalRef.current(transcript);
+      }
+      if (onUserUtteranceFinishedRef.current) {
+        onUserUtteranceFinishedRef.current();
       }
       if (nextScope && nextScope !== currentScope) {
         setCurrentScope(nextScope);
       }
     } catch (err) {
       console.error("Failed to transcribe user utterance:", err);
+      if (onUserUtteranceFinishedRef.current) {
+        onUserUtteranceFinishedRef.current();
+      }
     }
   }
 
@@ -695,6 +809,9 @@ export function useRealtimeVoiceSession(
                 { id, from: "user", text: "…" },
               ];
             });
+            if (onUserUtteranceStartedRef.current) {
+              onUserUtteranceStartedRef.current();
+            }
           }
         }
       } else if (
@@ -723,6 +840,9 @@ export function useRealtimeVoiceSession(
               setMessages((prev) =>
                 prev.filter((msg) => msg.id !== messageId)
               );
+            }
+            if (onUserUtteranceFinishedRef.current) {
+              onUserUtteranceFinishedRef.current();
             }
             return;
           }
@@ -764,6 +884,7 @@ export function useRealtimeVoiceSession(
     } catch (err) {
       console.error("Failed to send audio stop event:", err);
     }
+    audioOutputActiveRef.current = false;
 
     if (audioProcessorRef.current) {
       try {
@@ -866,49 +987,112 @@ export function useRealtimeVoiceSession(
     setLoading(false);
   }
 
-  useEffect(() => {
-    let didUnmount = false;
+  const scheduleReconnect = () => {
+    if (didUnmountRef.current || reconnectTimeoutRef.current) return;
+    if (!autoConnect && !inCallRef.current) return;
+    reconnectTimeoutRef.current = setTimeout(() => {
+      reconnectTimeoutRef.current = null;
+      void connect();
+    }, 1500);
+  };
 
-    const scheduleReconnect = () => {
-      if (didUnmount || reconnectTimeoutRef.current) return;
-      reconnectTimeoutRef.current = setTimeout(() => {
-        reconnectTimeoutRef.current = null;
-        connect();
-      }, 1500);
-    };
+  function connect(): Promise<boolean> | void {
+    if (didUnmountRef.current) return;
+    if (!sessionId) {
+      console.warn(
+        "[useRealtimeSession] connect() called without sessionId; aborting WebSocket open"
+      );
+      return;
+    }
+    if (wsRef.current?.readyState === WebSocket.OPEN) return;
+    if (pendingConnectionRef.current) {
+      return pendingConnectionRef.current;
+    }
+    if (connectingRef.current) return;
 
-    const connect = () => {
-      if (didUnmount) return;
-      const ws = new WebSocket(wsUrl);
-      ws.binaryType = "arraybuffer";
-      wsRef.current = ws;
+    // No connect if there is no real sessionId
+    if (!sessionId) {
+      return;
+    }
 
+    connectingRef.current = true;
+    const urlWithSession =
+      sessionId && wsUrl
+        ? `${wsUrl}${wsUrl.includes("?") ? "&" : "?"}sessionId=${encodeURIComponent(
+            sessionId
+          )}`
+        : wsUrl;
+    const ws = new WebSocket(urlWithSession);
+    ws.binaryType = "arraybuffer";
+    wsRef.current = ws;
+
+    const connectionPromise = new Promise<boolean>((resolve) => {
       ws.onopen = () => {
-        if (didUnmount) return;
+        if (didUnmountRef.current) {
+          resolve(false);
+          return;
+        }
+        connectingRef.current = false;
+        pendingConnectionRef.current = null;
         setWsConnected(true);
         pushSystem("Realtime WebSocket connected", "link");
+        touchActivity();
+        try {
+          ws.send(
+            JSON.stringify({
+              type: "client.stats.request",
+            })
+          );
+        } catch {
+          // ignore stats request failures
+        }
+        resolve(true);
       };
 
       ws.onclose = () => {
-        if (didUnmount) return;
+        const unmounted = didUnmountRef.current;
+
+        connectingRef.current = false;
+        pendingConnectionRef.current = null;
         setWsConnected(false);
-        pushSystem("Realtime WebSocket disconnected", "warning");
-        setCallStatus("idle");
-        scheduleReconnect();
+
+        if (closingForIdleRef.current) {
+          closingForIdleRef.current = false;
+
+          // Only show the idle timeout message if we are still mounted
+          if (!unmounted) {
+            pushSystem("Realtime WebSocket closed due to inactivity", "warning");
+          }
+
+          // Always persist the state, even if unmounted
+          void persistSessionStatus("expired");
+        } else {
+          if (!unmounted) {
+            pushSystem("Realtime WebSocket disconnected", "warning");
+            setCallStatus("idle");
+            scheduleReconnect();
+          }
+
+          // Always persist the state, even if unmounted
+          void persistSessionStatus("closed");
+        }
+
+        resolve(false);
       };
 
       ws.onerror = (err) => {
-        if (didUnmount) return;
+        if (didUnmountRef.current) {
+          resolve(false);
+          return;
+        }
+        connectingRef.current = false;
+        pendingConnectionRef.current = null;
         const message =
           err instanceof ErrorEvent
             ? err.message
             : typeof err === "object" && err && "message" in err
-            ? // @ts-expect-error: best-effort message extraction
-              err.message
+            ? (err as any).message
             : "";
-        // On initial connection failures, log a warning and let the
-        // reconnect logic handle it silently. Only surface an error
-        // in the chat if the socket was previously connected.
         if (wsConnectedRef.current) {
           if (message) {
             console.error("WS error:", message);
@@ -924,6 +1108,7 @@ export function useRealtimeVoiceSession(
         } catch {
           // ignore
         }
+        resolve(false);
       };
 
       ws.onmessage = async (event) => {
@@ -942,7 +1127,6 @@ export function useRealtimeVoiceSession(
 
         try {
           const data = JSON.parse(event.data);
-
           const currentResponseId = currentResponseIdRef.current;
           const eventResponseId =
             data.response_id || data.response?.id || data.id;
@@ -952,15 +1136,14 @@ export function useRealtimeVoiceSession(
             return;
           }
 
-          if (data.type === "response.text.delta") {
-            // For voice interactions we rely on the unified
-            // audio_transcript.* stream. Plain text deltas are
-            // ignored to avoid duplicating messages when both
-            // channels are enabled.
+          if (data.type === "server.stats") {
+            const count = Number(data.connections);
+            setBridgeConnections(Number.isFinite(count) ? count : null);
             return;
           }
 
           if (data.type === "response.audio_transcript.delta") {
+            audioOutputActiveRef.current = true;
             const delta: string = data.delta ?? "";
             if (
               !delta ||
@@ -978,10 +1161,6 @@ export function useRealtimeVoiceSession(
             if (id) {
               currentResponseIdRef.current = id;
             }
-            // In pure voice mode we always want to render the next
-            // assistant response, even if a previous one was
-            // interrupted. Reset drop flags whenever a fresh
-            // response is created.
             if (!USE_VOICE_TRANSCRIBE) {
               dropAssistantResponsesRef.current = false;
               dropAssistantAudioRef.current = false;
@@ -992,14 +1171,8 @@ export function useRealtimeVoiceSession(
           }
 
           if (data.type === "response.audio.delta") {
+            audioOutputActiveRef.current = true;
             setLoading(false);
-          }
-
-          if (data.type === "response.text.done") {
-            // Ignore plain text completions; we prefer the
-            // audio_transcript.* events as the single source
-            // of truth for assistant messages in the chat.
-            return;
           }
 
           if (data.type === "response.audio_transcript.done") {
@@ -1020,8 +1193,6 @@ export function useRealtimeVoiceSession(
             pendingAssistantTextRef.current = finalText;
             flushPendingAssistantText(80);
 
-            // Notify listeners (e.g. the chat UI) that this assistant
-            // turn has a final transcript, so they can persist it.
             if (onAssistantTurnFinalRef.current) {
               try {
                 onAssistantTurnFinalRef.current(finalText);
@@ -1046,6 +1217,54 @@ export function useRealtimeVoiceSession(
             if (!pendingAssistantTextRef.current) {
               setLoading(false);
             }
+            audioOutputActiveRef.current = false;
+          }
+
+          if (data.type === "response.text.delta") {
+            if (audioOutputActiveRef.current) {
+              return;
+            }
+            const delta: string = data.delta ?? "";
+            if (
+              !delta ||
+              dropAssistantResponsesRef.current ||
+              !currentResponseId ||
+              (eventResponseId && eventResponseId !== currentResponseId)
+            ) {
+              return;
+            }
+            currentAssistantTextRef.current += delta;
+          }
+
+          if (data.type === "response.text.done") {
+            if (audioOutputActiveRef.current) {
+              return;
+            }
+            const finalText: string =
+              (data.text as string) ?? currentAssistantTextRef.current;
+            currentAssistantTextRef.current = "";
+            if (
+              !finalText ||
+              dropAssistantResponsesRef.current ||
+              !currentResponseId ||
+              (eventResponseId && eventResponseId !== currentResponseId)
+            ) {
+              pendingAssistantTextRef.current = null;
+              return;
+            }
+            pendingAssistantTextRef.current = finalText;
+            flushPendingAssistantText(80);
+
+            if (onAssistantTurnFinalRef.current) {
+              try {
+                onAssistantTurnFinalRef.current(finalText);
+              } catch (err) {
+                console.error(
+                  "onAssistantTurnFinal callback threw an error:",
+                  err
+                );
+              }
+            }
           }
 
           if (
@@ -1056,10 +1275,6 @@ export function useRealtimeVoiceSession(
             const errorCode = data?.error?.code || data?.code;
             const hasDetails = data?.error || data?.message;
 
-            // Some realtime backends occasionally emit bare `error`
-            // events without any payload. These are not actionable and
-            // just create noise in the UI, so we log them and skip
-            // surfacing a system message.
             if (!hasDetails && !errorCode) {
               console.warn(
                 "Realtime error event without details (ignored):",
@@ -1095,25 +1310,66 @@ export function useRealtimeVoiceSession(
           setLoading(false);
         }
       };
-    };
+    });
 
-    connect();
-  }, [wsUrl]);
+    pendingConnectionRef.current = connectionPromise;
+    return connectionPromise;
+  }
+
+  useEffect(() => {
+    if (!autoConnect) return;
+    if (!sessionId) return;
+
+    const current = wsRef.current;
+
+    // If there is already an open WS but with a different sessionId, close it to force a new one.
+    if (
+      current &&
+      current.readyState === WebSocket.OPEN &&
+      lastSessionIdRef.current &&
+      lastSessionIdRef.current !== sessionId
+    ) {
+      try {
+        current.close();
+      } catch {
+        // ignore
+      }
+      wsRef.current = null;
+    }
+
+    // If there is no WS or it is closed, connect with the current sessionId.
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      lastSessionIdRef.current = sessionId;
+      void connect();
+    }
+
+    return () => {
+      reconnectTimeoutRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoConnect, sessionId, wsUrl]);
+
+  async function ensureConnected(): Promise<boolean> {
+    if (!sessionId) {
+      console.warn(
+        "[useRealtimeSession] ensureConnected() called without sessionId; aborting WebSocket open"
+      );
+      return false;
+    }
+    const maybePromise = connect();
+    if (maybePromise instanceof Promise) {
+      try {
+        await maybePromise;
+      } catch {
+        return false;
+      }
+    }
+    return wsRef.current?.readyState === WebSocket.OPEN;
+  }
 
   async function detectScopeViaVectors(text: string) {
-    try {
-      const res = await fetch("/api/scopes", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
-      });
-      if (!res.ok) return null;
-      const data = await res.json();
-      return typeof data.scope === "string" ? data.scope : null;
-    } catch (err) {
-      console.warn("Scope detection via vectors failed:", err);
-      return null;
-    }
+    const scope = await detectScope(text);
+    return scope;
   }
 
   function fallbackScopeDetection(text: string) {
@@ -1155,13 +1411,18 @@ export function useRealtimeVoiceSession(
     }
   ) {
     const trimmed = text.trim();
-    if (
-      !trimmed ||
-      !wsRef.current ||
-      wsRef.current.readyState !== WebSocket.OPEN
-    ) {
+    if (!trimmed) {
       return;
     }
+
+    touchActivity();
+
+    const ready = await ensureConnected();
+    if (!ready || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      pushSystem("No se pudo conectar con el servidor de voz", "warning");
+      return;
+    }
+    touchActivity();
 
     // Ensure assistant audio/text are accepted for this new turn,
     // even if the previous response was interrupted.
@@ -1264,31 +1525,38 @@ export function useRealtimeVoiceSession(
   }
 
   function startCall() {
-    if (!wsConnected) {
-      alert("Realtime server not connected");
-      return;
-    }
+    if (callStatus === "calling" || callStatus === "in_call") return;
 
-    dropAssistantResponsesRef.current = false;
-    dropAssistantAudioRef.current = false;
-    inCallRef.current = true;
-    setInCall(true);
-    setCallStatus("calling");
-    pushSystem("Launching voice session…", "call");
-    playCue("start");
-    void startAudioStreaming();
+    void (async () => {
+      touchActivity();
+      const ready = await ensureConnected();
+      if (!ready || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+        pushSystem("No se pudo conectar con el servidor de voz", "warning");
+        return;
+      }
+      touchActivity();
 
-    if (introPromptTimeoutRef.current) {
-      clearTimeout(introPromptTimeoutRef.current);
-    }
-    introPromptTimeoutRef.current = setTimeout(() => {
-      if (!inCallRef.current) return;
-      setCallStatus("in_call");
-      pushSystem("Call established", "success");
-      // We no longer send an automatic text prompt at call
-      // start; the profile instructions govern how the
-      // assistant greets the user once they actually speak.
-    }, 500);
+      dropAssistantResponsesRef.current = false;
+      dropAssistantAudioRef.current = false;
+      inCallRef.current = true;
+      setInCall(true);
+      setCallStatus("calling");
+      pushSystem("Launching voice session…", "call");
+      playCue("start");
+      void startAudioStreaming();
+
+      if (introPromptTimeoutRef.current) {
+        clearTimeout(introPromptTimeoutRef.current);
+      }
+      introPromptTimeoutRef.current = setTimeout(() => {
+        if (!inCallRef.current) return;
+        setCallStatus("in_call");
+        pushSystem("Call established", "success");
+        // We no longer send an automatic text prompt at call
+        // start; the profile instructions govern how the
+        // assistant greets the user once they actually speak.
+      }, 500);
+    })();
   }
 
   function endCall() {
@@ -1352,6 +1620,7 @@ export function useRealtimeVoiceSession(
       clearTimeout(introPromptTimeoutRef.current);
       introPromptTimeoutRef.current = null;
     }
+    void persistSessionStatus("closed");
   }
 
   function toggleSpeaker() {
@@ -1367,14 +1636,19 @@ export function useRealtimeVoiceSession(
   }
 
   const sessionActive = callStatus !== "idle";
-  const canStartCall = wsConnected && !sessionActive;
+  const canStartCall = !sessionActive;
   const sendDisabled = input.trim()
-    ? !wsConnected
-    : sessionActive
     ? false
-    : !canStartCall;
+    : callStatus === "calling";
   const isRecording = inCall && !micMuted;
 
+  function connectNow() {
+    closingForIdleRef.current = false;
+    return ensureConnected();
+  }
+
+  // If autoConnect is disabled, try to open the WS as soon as the user starts typing,
+  // so that sending text does not fail due to lack of connection.
   function handleUiCommand(command: string, args: any) {
     switch (command) {
       case "end_call":
@@ -1455,6 +1729,7 @@ export function useRealtimeVoiceSession(
     sessionActive,
     canStartCall,
     sendDisabled,
+    bridgeConnections,
 
     // setters / handlers
     setInput,
@@ -1465,5 +1740,6 @@ export function useRealtimeVoiceSession(
     toggleMic,
     handleSubmit,
     sendUserMessage,
+    connectNow,
   };
 }

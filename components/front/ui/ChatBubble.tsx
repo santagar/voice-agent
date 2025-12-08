@@ -5,7 +5,7 @@ import React from "react";
 type ChatBubbleProps = {
   from: "user" | "assistant" | "system";
   children: React.ReactNode;
-  meta?: string | null;
+  meta?: React.ReactNode | null;
   variant?: "chat";
   className?: string;
 };
@@ -41,12 +41,22 @@ export function ChatBubble({
         isUser ? "justify-end" : "justify-start"
       }`}
     >
-      <div className="flex flex-col items-start gap-1">
+      <div
+        className={`flex flex-col gap-1 ${
+          isUser ? "items-end text-right" : "items-start text-left"
+        }`}
+      >
         <div className={`${base} ${padding} ${palette} ${className}`}>
           {children}
         </div>
         {meta && (
-          <span className="text-[11px] text-slate-400">{meta}</span>
+          <div
+            className={`flex items-center gap-1 text-[12px] leading-tight text-gray-500 ${
+              isUser ? "justify-end pt-1 pr-2" : "justify-start"
+            }`}
+          >
+            {meta}
+          </div>
         )}
       </div>
     </div>

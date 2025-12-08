@@ -7,6 +7,365 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+/// Core user identity
+model User {
+  id                String             @id @default(uuid())
+  createdAt         DateTime           @default(now()) @map("created_at")
+  updatedAt         DateTime           @updatedAt @map("updated_at")
+  email             String             @unique
+  name              String?
+  image             String?
+  role              String             @default("user")
+  status            UserStatus         @default(active)
+  assistants        Assistant[]        @relation("AssistantOwner")
+  authAccounts      AuthAccount[]      @relation("UserAuthAccounts")
+  conversations     Conversation[]     @relation("ConversationUser")
+  instructions      Instruction[]      @relation("InstructionOwner")
+  sanitizationRules SanitizationRule[] @relation("SanitizationRuleOwner")
+  sessions          Session[]
+  tools             Tool[]             @relation("ToolOwner")
+  settings          UserSettings?
+  memberships       WorkspaceMember[]
+
+  @@map("users")
+}
+
+/// Per-user preferences (theme, locale, audio, debug flags, etc.)
+model UserSettings {
+  id               String   @id @default(uuid())
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+  userId           String   @unique @map("user_id")
+  theme            String   @default("system")
+  locale           String   @default("en")
+  playbackRate     Float    @default(1.05) @map("playback_rate")
+  voicePreferences Json?    @map("voice_preferences")
+  debugPreferences Json?    @map("debug_preferences")
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_settings")
+}
+
+/// Workspace / organization that groups assistants and conversations
+model Workspace {
+  id         String            @id @default(uuid())
+  createdAt  DateTime          @default(now()) @map("created_at")
+  updatedAt  DateTime          @updatedAt @map("updated_at")
+  name       String
+  slug       String            @unique
+  status     WorkspaceStatus   @default(active)
+  assistants Assistant[]
+  members    WorkspaceMember[]
+
+  @@map("workspaces")
+}
+
+/// Membership of a user in a workspace with a role
+model WorkspaceMember {
+  id          String    @id @default(uuid())
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  role        String    @default("member")
+  workspaceId String    @map("workspace_id")
+  userId      String    @map("user_id")
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId], map: "workspace_user_unique")
+  @@map("workspace_members")
+}
+
+/// Generic tool definition aligned with Realtime API tools.
+/// - `type` matches Realtime tool type: "function", "code_interpreter", "file_search", etc.
+/// - `kind` is app-specific routing: "business", "session", "system", etc.
+/// - `definitionJson` stores the raw tool spec/config (e.g. function parameters, options).
+model Tool {
+  id                String          @id @default(uuid())
+  createdAt         DateTime        @default(now()) @map("created_at")
+  updatedAt         DateTime        @updatedAt @map("updated_at")
+  name              String
+  type              String          @default("function")
+  kind              String          @default("business")
+  definitionJson    Json            @map("definition_json")
+  status            String          @default("active")
+  ownerId           String?         @map("owner_id")
+  assistantId       String?         @map("assistant_id")
+  assistantBindings AssistantTool[]
+  toolCalls         ToolCall[]
+  assistant         Assistant?      @relation("AssistantToolsOwned", fields: [assistantId], references: [id], onDelete: Cascade)
+  owner             User?           @relation("ToolOwner", fields: [ownerId], references: [id])
+
+  @@unique([name, assistantId], map: "tool_name_assistant_unique")
+  @@map("tools")
+}
+
+/// Join assistant ↔ tool for assigning multiple tools to each assistant.
+model AssistantTool {
+  id          String    @id @default(uuid())
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  assistantId String    @map("assistant_id")
+  toolId      String    @map("tool_id")
+  enabled     Boolean   @default(true)
+  tool        Tool      @relation(fields: [toolId], references: [id], onDelete: Cascade)
+  assistant   Assistant @relation(fields: [assistantId], references: [id], onDelete: Cascade)
+
+  @@unique([assistantId, toolId], map: "assistant_tool_unique")
+  @@map("assistant_tools")
+}
+
+/// Generic instruction block used to build Realtime `session.instructions`.
+/// - `type` represents the logical block: "identity", "tone_guideline", etc.
+/// - `lines` stores the list of textual instructions for that block.
+/// NOTE: when moving to Postgres this can become `String[]` instead of `Json`.
+model Instruction {
+  id                String                 @id @default(uuid())
+  createdAt         DateTime               @default(now()) @map("created_at")
+  updatedAt         DateTime               @updatedAt @map("updated_at")
+  type              String
+  label             String?
+  lines             Json                   @map("lines_json")
+  status            String                 @default("active")
+  ownerId           String?                @map("owner_id")
+  assistantId       String?                @map("assistant_id")
+  assistantBindings AssistantInstruction[]
+  assistant         Assistant?             @relation("AssistantInstructionBlocks", fields: [assistantId], references: [id], onDelete: Cascade)
+  owner             User?                  @relation("InstructionOwner", fields: [ownerId], references: [id])
+
+  @@map("instructions")
+}
+
+/// Join assistant ↔ instruction for assigning multiple instruction blocks
+/// to each assistant, with per-assistant enable/disable and ordering.
+model AssistantInstruction {
+  id            String      @id @default(uuid())
+  createdAt     DateTime    @default(now()) @map("created_at")
+  updatedAt     DateTime    @updatedAt @map("updated_at")
+  assistantId   String      @map("assistant_id")
+  instructionId String      @map("instruction_id")
+  enabled       Boolean     @default(true)
+  sortOrder     Int         @default(0) @map("sort_order")
+  instruction   Instruction @relation(fields: [instructionId], references: [id], onDelete: Cascade)
+  assistant     Assistant   @relation(fields: [assistantId], references: [id], onDelete: Cascade)
+
+  @@unique([assistantId, instructionId], map: "assistant_instruction_unique")
+  @@map("assistant_instructions")
+}
+
+/// Sanitization rule applied to assistant input/output text.
+/// - `direction` controls where it is applied: "in", "out" or "both".
+model SanitizationRule {
+  id                String                      @id @default(uuid())
+  createdAt         DateTime                    @default(now()) @map("created_at")
+  updatedAt         DateTime                    @updatedAt @map("updated_at")
+  description       String?
+  pattern           String
+  flags             String?                     @default("g")
+  replacement       String                      @default("")
+  direction         String                      @default("out")
+  status            String                      @default("active")
+  ownerId           String?                     @map("owner_id")
+  assistantBindings AssistantSanitizationRule[]
+  owner             User?                       @relation("SanitizationRuleOwner", fields: [ownerId], references: [id])
+
+  @@map("sanitization_rules")
+}
+
+/// Join assistant ↔ sanitization rule for assigning multiple rules
+/// to each assistant, with per-assistant enable/disable and ordering.
+model AssistantSanitizationRule {
+  id          String           @id @default(uuid())
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
+  assistantId String           @map("assistant_id")
+  ruleId      String           @map("rule_id")
+  enabled     Boolean          @default(true)
+  sortOrder   Int              @default(0) @map("sort_order")
+  rule        SanitizationRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  assistant   Assistant        @relation(fields: [assistantId], references: [id], onDelete: Cascade)
+
+  @@unique([assistantId, ruleId], map: "assistant_sanitization_rule_unique")
+  @@map("assistant_sanitization_rules")
+}
+
+/// Assistant instance configured by a user within a workspace
+model Assistant {
+  id                String                      @id @default(uuid())
+  createdAt         DateTime                    @default(now()) @map("created_at")
+  updatedAt         DateTime                    @updatedAt @map("updated_at")
+  name              String
+  description       String?
+  slug              String                      @unique
+  status            AssistantStatus             @default(active)
+  workspaceId       String                      @map("workspace_id")
+  ownerId           String                      @map("owner_id")
+  instructions      AssistantInstruction[]
+  sanitizationRules AssistantSanitizationRule[]
+  scopes            AssistantScopeDefinition[]
+  tools             AssistantTool[]
+  owner             User                        @relation("AssistantOwner", fields: [ownerId], references: [id])
+  workspace         Workspace                   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  conversations     Conversation[]
+  instructionBlocks Instruction[]               @relation("AssistantInstructionBlocks")
+  knowledgeSource   KnowledgeSource[]
+  sessions          Session[]
+  ownedTools        Tool[]                      @relation("AssistantToolsOwned")
+
+  @@map("assistants")
+}
+
+/// Scope definitions per assistant (support, star-wars, tech, etc.)
+model AssistantScopeDefinition {
+  id          String    @id @default(uuid())
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  assistantId String    @map("assistant_id")
+  name        String
+  description String?
+  keywords    Json?     @map("keywords_json")
+  metadata    Json?     @map("metadata_json")
+  assistant   Assistant @relation(fields: [assistantId], references: [id], onDelete: Cascade)
+
+  @@unique([assistantId, name], map: "assistant_scope_unique")
+  @@map("assistant_scope_definitions")
+}
+
+/// Knowledge source configuration (Pinecone, JSON, etc.) per assistant
+model KnowledgeSource {
+  id          String    @id @default(uuid())
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  assistantId String    @map("assistant_id")
+  provider    String
+  indexName   String?   @map("index_name")
+  indexHost   String?   @map("index_host")
+  namespace   String?   @map("namespace")
+  metadata    Json?     @map("metadata_json")
+  enabled     Boolean   @default(true)
+  assistant   Assistant @relation(fields: [assistantId], references: [id], onDelete: Cascade)
+
+  @@map("knowledge_sources")
+}
+
+/// Conversation between a user and an assistant
+model Conversation {
+  id           String                   @id @default(uuid())
+  createdAt    DateTime                 @default(now()) @map("created_at")
+  updatedAt    DateTime                 @updatedAt @map("updated_at")
+  title        String
+  mode         String                   @default("unknown")
+  currentScope String?                  @map("current_scope")
+  status       ConversationStatus       @default(active)
+  assistantId  String                   @map("assistant_id")
+  userId       String?                  @map("user_id")
+  scopeEvents  ConversationScopeEvent[]
+  user         User?                    @relation("ConversationUser", fields: [userId], references: [id])
+  assistant    Assistant                @relation(fields: [assistantId], references: [id], onDelete: Cascade)
+  messages     Message[]
+  sessions     Session[]
+  toolCalls    ToolCall[]
+
+  @@map("conversations")
+}
+
+/// Individual message turn within a conversation
+model Message {
+  id             String       @id @default(uuid())
+  createdAt      DateTime     @default(now()) @map("created_at")
+  from           String
+  text           String
+  sequence       Int          @default(0)
+  meta           Json?        @map("meta_json")
+  audioUrl       String?      @map("audio_url")
+  toolCallId     String?      @map("tool_call_id")
+  conversationId String       @map("conversation_id")
+  toolCall       ToolCall?    @relation(fields: [toolCallId], references: [id])
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@map("messages")
+}
+
+/// Tool invocation originating from the assistant within a conversation
+model ToolCall {
+  id             String       @id @default(uuid())
+  createdAt      DateTime     @default(now()) @map("created_at")
+  completedAt    DateTime?    @map("completed_at")
+  name           String
+  status         String       @default("started")
+  inputJson      Json         @map("input_json")
+  resultJson     Json?        @map("result_json")
+  error          String?
+  conversationId String       @map("conversation_id")
+  toolId         String?      @map("tool_id")
+  messages       Message[]
+  tool           Tool?        @relation(fields: [toolId], references: [id])
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@map("tool_calls")
+}
+
+/// Scope change events within a conversation (e.g. support → star-wars)
+model ConversationScopeEvent {
+  id             String       @id @default(uuid())
+  createdAt      DateTime     @default(now()) @map("created_at")
+  fromScope      String?      @map("from_scope")
+  toScope        String       @map("to_scope")
+  reason         String?
+  conversationId String       @map("conversation_id")
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@map("conversation_scope_events")
+}
+
+/// Live session metadata (WS bridge) used to track connection lifecycle and config snapshot.
+model Session {
+  id              String        @id @default(uuid())
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+  status          SessionStatus @default(active)
+  channel         String        @default("web")
+  assistantConfig Json?         @map("assistant_config")
+  userId          String?       @map("user_id")
+  assistantId     String        @map("assistant_id")
+  conversationId  String?       @map("conversation_id")
+  conversation    Conversation? @relation(fields: [conversationId], references: [id])
+  assistant       Assistant     @relation(fields: [assistantId], references: [id], onDelete: Cascade)
+  user            User?         @relation(fields: [userId], references: [id])
+
+  @@map("sessions")
+}
+
+/// Authentication accounts per user (provider + providerAccountId)
+model AuthAccount {
+  id                String            @id @default(uuid())
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+  userId            String            @map("user_id")
+  provider          String
+  providerAccountId String            @map("provider_account_id")
+  type              String            @default("oauth")
+  status            AuthAccountStatus @default(active)
+  user              User              @relation("UserAuthAccounts", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId], map: "provider_account_unique")
+  @@map("auth_accounts")
+}
+
+model Article {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  slug      String
+  locale    String
+  title     String
+  category  String?
+  summary   String?
+  mdUrl     String
+
+  @@unique([slug, locale], map: "help_article_slug_locale_unique")
+  @@map("articles")
+}
+
 /// Status for user entities:
 /// - active: can use the platform normally
 /// - suspended: temporarily blocked (e.g. abuse, billing issues)
@@ -47,6 +406,16 @@ enum ConversationStatus {
   archived
 }
 
+/// Status for realtime sessions:
+/// - active: connection open/usable
+/// - closed: explicitly finished
+/// - expired: auto-closed (idle/timeout)
+enum SessionStatus {
+  active
+  closed
+  expired
+}
+
 /// Status for authentication accounts:
 /// - active: account can be used to sign in
 /// - suspended: temporarily blocked
@@ -55,381 +424,4 @@ enum AuthAccountStatus {
   active
   suspended
   disabled
-}
-
-/// Core user identity
-model User {
-  id        String   @id @default(uuid())
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt      @map("updated_at")
-  email     String   @unique
-  name      String?
-  image     String?
-  role      String   @default("user")
-  status    UserStatus @default(active)
-
-  settings     UserSettings?
-  memberships  WorkspaceMember[]
-  assistants   Assistant[]           @relation("AssistantOwner")
-  conversations Conversation[]       @relation("ConversationUser")
-  authAccounts AuthAccount[]         @relation("UserAuthAccounts")
-
-  tools             Tool[]             @relation("ToolOwner")
-  instructions      Instruction[]      @relation("InstructionOwner")
-  sanitizationRules SanitizationRule[] @relation("SanitizationRuleOwner")
-
-  @@map("users")
-}
-
-/// Per-user preferences (theme, locale, audio, debug flags, etc.)
-model UserSettings {
-  id               String   @id @default(uuid())
-  createdAt        DateTime @default(now()) @map("created_at")
-  updatedAt        DateTime @updatedAt      @map("updated_at")
-  userId           String   @unique @map("user_id")
-  theme            String   @default("system")
-  locale           String   @default("en")
-  playbackRate     Float    @default(1.05) @map("playback_rate")
-  voicePreferences Json?    @map("voice_preferences")
-  debugPreferences Json?    @map("debug_preferences")
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@map("user_settings")
-}
-
-/// Workspace / organization that groups assistants and conversations
-model Workspace {
-  id        String   @id @default(uuid())
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt      @map("updated_at")
-  name      String
-  slug      String   @unique
-  status    WorkspaceStatus @default(active)
-
-  members       WorkspaceMember[]
-  assistants    Assistant[]
-
-  @@map("workspaces")
-}
-
-/// Membership of a user in a workspace with a role
-model WorkspaceMember {
-  id          String   @id @default(uuid())
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt      @map("updated_at")
-  role        String   @default("member")
-  workspaceId String   @map("workspace_id")
-  userId      String   @map("user_id")
-
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([workspaceId, userId], map: "workspace_user_unique")
-  @@map("workspace_members")
-}
-
-/// Generic tool definition aligned with Realtime API tools.
-/// - `type` matches Realtime tool type: "function", "code_interpreter", "file_search", etc.
-/// - `kind` is app-specific routing: "business", "session", "system", etc.
-/// - `definitionJson` stores the raw tool spec/config (e.g. function parameters, options).
-model Tool {
-  id            String   @id @default(uuid())
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt      @map("updated_at")
-
-  name          String
-  type          String   @default("function")
-  kind          String   @default("business")
-  definitionJson Json    @map("definition_json")
-  status        String   @default("active")
-
-  ownerId String? @map("owner_id")
-  owner   User?   @relation("ToolOwner", fields: [ownerId], references: [id])
-
-  assistantId String?   @map("assistant_id")
-  assistant   Assistant? @relation("AssistantToolsOwned", fields: [assistantId], references: [id], onDelete: Cascade)
-
-  assistantBindings AssistantTool[]
-  toolCalls         ToolCall[]
-
-  // We only require uniqueness for the pair (name, assistantId) so
-  // that a tool name can be reused across assistants and in global
-  // templates (assistantId = null). This avoids reusing a single
-  // definition row across assistants while still giving us a stable
-  // handle for seeding and lookup.
-  @@unique([name, assistantId], map: "tool_name_assistant_unique")
-  @@map("tools")
-}
-
-/// Join assistant ↔ tool for assigning multiple tools to each assistant.
-model AssistantTool {
-  id          String   @id @default(uuid())
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt      @map("updated_at")
-  assistantId String   @map("assistant_id")
-  toolId      String   @map("tool_id")
-  enabled     Boolean  @default(true)
-
-  assistant Assistant @relation(fields: [assistantId], references: [id], onDelete: Cascade)
-  tool      Tool      @relation(fields: [toolId], references: [id], onDelete: Cascade)
-
-  @@unique([assistantId, toolId], map: "assistant_tool_unique")
-  @@map("assistant_tools")
-}
-
-/// Generic instruction block used to build Realtime `session.instructions`.
-/// - `type` represents the logical block: "identity", "tone_guideline", etc.
-/// - `lines` stores the list of textual instructions for that block.
-///   NOTE: when moving to Postgres this can become `String[]` instead of `Json`.
-model Instruction {
-  id        String   @id @default(uuid())
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt      @map("updated_at")
-
-  type   String
-  label  String?
-  lines  Json     @map("lines_json")
-  status String   @default("active")
-
-  ownerId String? @map("owner_id")
-  owner   User?   @relation("InstructionOwner", fields: [ownerId], references: [id])
-
-  assistantId String?   @map("assistant_id")
-  assistant   Assistant? @relation("AssistantInstructionBlocks", fields: [assistantId], references: [id], onDelete: Cascade)
-
-  assistantBindings AssistantInstruction[]
-
-  @@map("instructions")
-}
-
-/// Join assistant ↔ instruction for assigning multiple instruction blocks
-/// to each assistant, with per-assistant enable/disable and ordering.
-model AssistantInstruction {
-  id            String   @id @default(uuid())
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt      @map("updated_at")
-  assistantId   String   @map("assistant_id")
-  instructionId String   @map("instruction_id")
-  enabled       Boolean  @default(true)
-  sortOrder     Int      @default(0) @map("sort_order")
-
-  assistant   Assistant   @relation(fields: [assistantId], references: [id], onDelete: Cascade)
-  instruction Instruction @relation(fields: [instructionId], references: [id], onDelete: Cascade)
-
-  @@unique([assistantId, instructionId], map: "assistant_instruction_unique")
-  @@map("assistant_instructions")
-}
-
-/// Sanitization rule applied to assistant input/output text.
-/// - `direction` controls where it is applied: "in", "out" or "both".
-model SanitizationRule {
-  id          String   @id @default(uuid())
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt      @map("updated_at")
-
-  description String?
-  pattern     String
-  flags       String?  @default("g")
-  replacement String   @default("")
-  direction   String   @default("out")
-  status      String   @default("active")
-
-  ownerId String? @map("owner_id")
-  owner   User?   @relation("SanitizationRuleOwner", fields: [ownerId], references: [id])
-
-  assistantBindings AssistantSanitizationRule[]
-
-  @@map("sanitization_rules")
-}
-
-/// Join assistant ↔ sanitization rule for assigning multiple rules
-/// to each assistant, with per-assistant enable/disable and ordering.
-model AssistantSanitizationRule {
-  id          String   @id @default(uuid())
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt      @map("updated_at")
-  assistantId String   @map("assistant_id")
-  ruleId      String   @map("rule_id")
-  enabled     Boolean  @default(true)
-  sortOrder   Int      @default(0) @map("sort_order")
-
-  assistant Assistant        @relation(fields: [assistantId], references: [id], onDelete: Cascade)
-  rule      SanitizationRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
-
-  @@unique([assistantId, ruleId], map: "assistant_sanitization_rule_unique")
-  @@map("assistant_sanitization_rules")
-}
-
-/// Assistant instance configured by a user within a workspace
-model Assistant {
-  id        String   @id @default(uuid())
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt      @map("updated_at")
-
-  name        String
-  description String?
-  slug        String   @unique
-  status      AssistantStatus @default(active)
-
-  workspaceId String  @map("workspace_id")
-  ownerId     String  @map("owner_id")
-
-  workspace Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  owner     User             @relation("AssistantOwner", fields: [ownerId], references: [id])
-
-  conversations   Conversation[]
-  scopes          AssistantScopeDefinition[]
-  knowledgeSource KnowledgeSource[]
-  tools           AssistantTool[]
-  instructions    AssistantInstruction[]
-  sanitizationRules AssistantSanitizationRule[]
-  instructionBlocks Instruction[] @relation("AssistantInstructionBlocks")
-  ownedTools       Tool[]        @relation("AssistantToolsOwned")
-
-  @@map("assistants")
-}
-
-/// Scope definitions per assistant (support, star-wars, tech, etc.)
-model AssistantScopeDefinition {
-  id          String   @id @default(uuid())
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt      @map("updated_at")
-  assistantId String   @map("assistant_id")
-  name        String
-  description String?
-  keywords    Json?    @map("keywords_json")
-  metadata    Json?    @map("metadata_json")
-
-  assistant Assistant @relation(fields: [assistantId], references: [id], onDelete: Cascade)
-
-  @@unique([assistantId, name], map: "assistant_scope_unique")
-  @@map("assistant_scope_definitions")
-}
-
-/// Knowledge source configuration (Pinecone, JSON, etc.) per assistant
-model KnowledgeSource {
-  id          String   @id @default(uuid())
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt      @map("updated_at")
-  assistantId String   @map("assistant_id")
-  provider    String
-  indexName   String?  @map("index_name")
-  indexHost   String?  @map("index_host")
-  namespace   String?  @map("namespace")
-  metadata    Json?    @map("metadata_json")
-  enabled     Boolean  @default(true)
-
-  assistant Assistant @relation(fields: [assistantId], references: [id], onDelete: Cascade)
-
-  @@map("knowledge_sources")
-}
-
-/// Conversation between a user and an assistant
-model Conversation {
-  id           String   @id @default(uuid())
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt      @map("updated_at")
-  title        String
-  mode         String   @default("unknown")
-  currentScope String?  @map("current_scope")
-  status       ConversationStatus @default(active)
-
-  assistantId String  @map("assistant_id")
-  userId      String? @map("user_id")
-
-  assistant Assistant @relation(fields: [assistantId], references: [id], onDelete: Cascade)
-  user      User?     @relation("ConversationUser", fields: [userId], references: [id])
-
-  messages    Message[]
-  toolCalls   ToolCall[]
-  scopeEvents ConversationScopeEvent[]
-
-  @@map("conversations")
-}
-
-/// Individual message turn within a conversation
-model Message {
-  id             String   @id @default(uuid())
-  createdAt      DateTime @default(now()) @map("created_at")
-  from           String
-  text           String
-  sequence       Int      @default(0)
-  meta           Json?    @map("meta_json")
-  audioUrl       String?  @map("audio_url")
-  toolCallId     String?  @map("tool_call_id")
-  conversationId String   @map("conversation_id")
-
-  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  toolCall     ToolCall?    @relation(fields: [toolCallId], references: [id])
-
-  @@map("messages")
-}
-
-/// Tool invocation originating from the assistant within a conversation
-model ToolCall {
-  id             String    @id @default(uuid())
-  createdAt      DateTime  @default(now()) @map("created_at")
-  completedAt    DateTime? @map("completed_at")
-  name           String
-  status         String    @default("started")
-  inputJson      Json      @map("input_json")
-  resultJson     Json?     @map("result_json")
-  error          String?
-
-  conversationId String   @map("conversation_id")
-  toolId         String?  @map("tool_id")
-
-  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  tool         Tool?        @relation(fields: [toolId], references: [id])
-  messages     Message[]
-
-  @@map("tool_calls")
-}
-
-/// Scope change events within a conversation (e.g. support → star-wars)
-model ConversationScopeEvent {
-  id             String   @id @default(uuid())
-  createdAt      DateTime @default(now()) @map("created_at")
-  fromScope      String?  @map("from_scope")
-  toScope        String   @map("to_scope")
-  reason         String?
-
-  conversationId String       @map("conversation_id")
-  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-
-  @@map("conversation_scope_events")
-}
-
-/// Authentication accounts per user (provider + providerAccountId)
-model AuthAccount {
-  id                String   @id @default(uuid())
-  createdAt         DateTime @default(now()) @map("created_at")
-  updatedAt         DateTime @updatedAt      @map("updated_at")
-  userId            String   @map("user_id")
-  provider          String
-  providerAccountId String   @map("provider_account_id")
-  type              String   @default("oauth")
-  status            AuthAccountStatus @default(active)
-
-  user User @relation("UserAuthAccounts", fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([provider, providerAccountId], map: "provider_account_unique")
-  @@map("auth_accounts")
-}
-
-model Article {
-  id        String   @id @default(uuid())
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt      @map("updated_at")
-
-  slug     String
-  locale   String
-  title    String
-  category String?
-  summary  String?
-  mdUrl    String
-
-  @@unique([slug, locale], map: "help_article_slug_locale_unique")
-  @@map("articles")
 }

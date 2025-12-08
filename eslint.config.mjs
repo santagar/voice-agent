@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Generated / bundled outputs and legacy scripts
+    "dist/**",
+    "realtime-server.js",
+    "scripts/**/*.cjs",
   ]),
 ]);
 

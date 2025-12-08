@@ -3,6 +3,7 @@ import { getInitialUserPreferences } from "@/lib/server/userPreferences";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth/options";
 import { prisma } from "@/lib/prisma";
+import { VoiceMessage } from "@/lib/realtime/useRealtimeSession";
 
 type ChatByIdPageProps = {
   params: Promise<{
@@ -136,11 +137,59 @@ export default async function ChatByIdPage({ params }: ChatByIdPageProps) {
     };
   });
 
+  // Preload conversation messages to avoid a flash on client hydration.
+  let initialMessages: VoiceMessage[] | null = null;
+  try {
+    const conversationWithMessages = await prisma.conversation.findUnique({
+      where: { id: chatId },
+      include: {
+        messages: {
+          orderBy: { createdAt: "asc" },
+        },
+      },
+    });
+    if (conversationWithMessages?.messages) {
+      initialMessages = conversationWithMessages.messages.map((m) => {
+        const rawMeta =
+          (m as any).meta ?? (m as any).meta_json ?? (m as any).metaJson ?? null;
+        let parsedMeta: Record<string, unknown> | string | null = null;
+        if (typeof rawMeta === "string") {
+          try {
+            const asObj = JSON.parse(rawMeta);
+            parsedMeta =
+              asObj && typeof asObj === "object"
+                ? (asObj as Record<string, unknown>)
+                : rawMeta;
+          } catch {
+            parsedMeta = rawMeta;
+          }
+        } else if (rawMeta && typeof rawMeta === "object") {
+          parsedMeta = rawMeta as Record<string, unknown>;
+        }
+
+        return {
+          id: m.id,
+          from:
+            m.from === "assistant"
+              ? "assistant"
+              : m.from === "system"
+              ? "system"
+              : "user",
+          text: m.text ?? "",
+          meta: parsedMeta,
+        };
+      });
+    }
+  } catch {
+    initialMessages = null;
+  }
+
   return (
     <MainClient
       initialSidebarCollapsed={initialSidebarCollapsed}
       workspaceId={workspaceId}
       assistantId={assistantId}
+      currentUserId={userId ?? null}
       initialAssistants={assistantOptions}
       initialLoggedIn={!!session}
       initialUserEmail={session?.user?.email ?? null}
@@ -148,6 +197,7 @@ export default async function ChatByIdPage({ params }: ChatByIdPageProps) {
       initialUserImage={(session?.user as any)?.image ?? null}
       initialChatId={chatId}
       initialChats={initialChats}
+      initialMessages={initialMessages}
     />
   );
 }

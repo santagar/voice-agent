@@ -29,8 +29,8 @@
   "chat.hero.subtitle": "Start a new conversation with your voice assistant. You can speak or type whatever you need.",
 
   "chat.input.placeholderInCall": "Speak or type here…",
-  "chat.input.placeholderIdle": "Press the button to start the call",
-  "chat.input.placeholderConfigureAssistant": "Configure this assistant in the editor before starting",
+  "chat.input.placeholderIdle": "Ask anything",
+  "chat.input.placeholderConfigureAssistant": "Configure current assistant before ask anything",
   "chat.status.thinking": "The assistant is thinking…",
   "chat.emptyConversation": "This chat doesn't have any messages yet.",
   "chat.loadingConversation": "Loading conversation…",

@@ -49,7 +49,7 @@ Next.js frontend (chat UI + AudioContext)
   - `/` and `/chat`: main chat + voice view (MVP).
   - `/api/*`: HTTP endpoints for tools, scopes, STT, and intent classification.
 
-- **Shared voice hook (`lib/voice/useRealtimeVoiceSession.ts`)**
+- **Shared voice hook (`hooks/useRealtimeSession.ts`)**
   - Owns the client WebSocket to the bridge (`ws://localhost:4001`).
   - Captures microphone audio (`getUserMedia`), downsamples to 24 kHz PCM16 and streams it over WS.
   - Maintains VAD and barge‑in on the client:
@@ -94,7 +94,7 @@ Next.js frontend (chat UI + AudioContext)
     - `name`, `description`, `parameters` (JSON Schema for arguments).
     - `kind`: `"business"` vs `"session"`.
     - `routes` (for business tools): HTTP method + path template under `/api/tools/*` or an external backend.
-    - `ui_command` (for session tools): command name consumed by `useRealtimeVoiceSession` (e.g., `"end_call"`, `"mute_speaker"`).
+    - `ui_command` (for session tools): command name consumed by `useRealtimeSession` (e.g., `"end_call"`, `"mute_speaker"`).
     - `session_update` (optional): declarative mapping to update Realtime session settings (e.g., changing the voice).
   - Example business endpoints:
     - `app/api/tools/bookings/[locator]/route.ts` → mock booking lookup.
@@ -485,13 +485,13 @@ Session tools control the “shell” of the agent: ending calls, muting, or cha
      ```
 
    - An optional `session.update` to the Realtime API when `session_update` is present (for example, updating `session.voice` for `set_voice`).
-3. The frontend hook (`useRealtimeVoiceSession`) listens for `ui.command` and maps them to local behavior:
+3. The frontend hook (`useRealtimeSession`) listens for `ui.command` and maps them to local behavior:
    - `end_call` → calls `endCall()` and cleans up audio.
    - `mute_speaker` / `unmute_speaker` → toggles the output audio state.
    - `mute_mic` / `unmute_mic` → toggles the mic state (affects audio in + STT).
    - `set_voice` → currently applied via `session.update` on the server; you can optionally show a system message in the UI.
 
-This separation keeps the agent’s behavior declarative in `config/tools.json` while making it clear where to plug in business logic (`/api/tools/*`) and where to plug UI/session behavior (`useRealtimeVoiceSession`).
+This separation keeps the agent’s behavior declarative in `config/tools.json` while making it clear where to plug in business logic (`/api/tools/*`) and where to plug UI/session behavior (`useRealtimeSession`).
 
 ### Vector Database (Optional)
 

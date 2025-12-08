@@ -38,6 +38,8 @@ export function AssistantsManager({
 }: AssistantsManagerProps) {
   const [assistantConfig, setAssistantConfig] =
     useState<AssistantConfig | null>(null);
+  const [displayAssistantConfig, setDisplayAssistantConfig] =
+    useState<AssistantConfig | null>(null);
   const [assistantConfigLoading, setAssistantConfigLoading] = useState(false);
   const [assistantConfigError, setAssistantConfigError] = useState<
     string | null
@@ -117,6 +119,7 @@ export function AssistantsManager({
   useEffect(() => {
     if (!activeAssistantId) {
       setAssistantConfig(null);
+      setDisplayAssistantConfig(null);
       setAssistantConfigError(null);
       setAssistantConfigLoading(false);
       return;
@@ -125,6 +128,7 @@ export function AssistantsManager({
     const cached = configCache[activeAssistantId];
     if (cached) {
       setAssistantConfig(cached);
+      setDisplayAssistantConfig(cached);
       setAssistantConfigLoading(false);
       setAssistantConfigError(null);
       return;
@@ -140,6 +144,7 @@ export function AssistantsManager({
         .then((data) => {
           if (loadId === loadIdRef.current) {
             setAssistantConfig(data);
+            setDisplayAssistantConfig(data);
             cacheConfig(activeAssistantId, data);
           }
         })
@@ -175,6 +180,7 @@ export function AssistantsManager({
         const data = await promise;
         if (!cancelled && loadId === loadIdRef.current) {
           setAssistantConfig(data);
+          setDisplayAssistantConfig(data);
           cacheConfig(activeAssistantId, data);
         }
       } catch (err) {
@@ -196,10 +202,21 @@ export function AssistantsManager({
   }, [activeAssistantId]);
 
   useEffect(() => {
-    if (!assistantConfig) return;
-    setAssistantFormName(assistantConfig.assistant.name);
-    setAssistantFormDescription(assistantConfig.assistant.description ?? "");
-  }, [assistantConfig]);
+    if (!displayAssistantConfig) return;
+    setAssistantFormName(displayAssistantConfig.assistant.name);
+    setAssistantFormDescription(
+      displayAssistantConfig.assistant.description ?? ""
+    );
+  }, [displayAssistantConfig]);
+
+  useEffect(() => {
+    if (
+      assistantConfig &&
+      assistantConfig.assistant.id === activeAssistantId
+    ) {
+      setDisplayAssistantConfig(assistantConfig);
+    }
+  }, [assistantConfig, activeAssistantId]);
 
   async function updateAssistantInstructions(
     updates: { id: string; enabled: boolean; sortOrder?: number }[]
@@ -593,29 +610,37 @@ export function AssistantsManager({
           }`}
         >
           {activeAssistantId ? (
-            assistantConfig ? (
-              <AssistantSettingsPanel
-                isDark={isDark}
-                assistantConfig={assistantConfig}
-                loading={assistantConfigLoading}
-                error={assistantConfigError}
-                saving={assistantConfigSaving}
-                assistantFormName={assistantFormName}
-                assistantFormDescription={assistantFormDescription}
-                onChangeName={setAssistantFormName}
-                onChangeDescription={setAssistantFormDescription}
-                onSaveBasics={saveAssistantBasics}
-                updateInstructions={updateAssistantInstructions}
-                updateTools={updateAssistantTools}
-                updateSanitize={updateAssistantSanitize}
-                setAssistantConfig={setAssistantConfig}
-                activeAssistantId={activeAssistantId}
-                currentUserId={currentUserId}
-                onDeleteAssistant={(assistantId) => {
-                  setPendingDeleteAssistantId(assistantId);
-                  setShowDeleteAssistantDialog(true);
-                }}
-              />
+            displayAssistantConfig ? (
+              <div className="relative flex-1">
+                <AssistantSettingsPanel
+                  isDark={isDark}
+                  assistantConfig={displayAssistantConfig}
+                  loading={assistantConfigLoading}
+                  error={assistantConfigError}
+                  saving={assistantConfigSaving}
+                  assistantFormName={assistantFormName}
+                  assistantFormDescription={assistantFormDescription}
+                  onChangeName={setAssistantFormName}
+                  onChangeDescription={setAssistantFormDescription}
+                  onSaveBasics={saveAssistantBasics}
+                  updateInstructions={updateAssistantInstructions}
+                  updateTools={updateAssistantTools}
+                  updateSanitize={updateAssistantSanitize}
+                  setAssistantConfig={setAssistantConfig}
+                  activeAssistantId={activeAssistantId}
+                  currentUserId={currentUserId}
+                  onDeleteAssistant={(assistantId) => {
+                    setPendingDeleteAssistantId(assistantId);
+                    setShowDeleteAssistantDialog(true);
+                  }}
+                />
+                {assistantConfigLoading && (
+                  <div className="pointer-events-none absolute right-3 top-3 flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs shadow-sm bg-white/90 text-zinc-700 dark:bg-neutral-800/90 dark:text-zinc-200 dark:border-neutral-700">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>{t("common.loading", "Loading…")}</span>
+                  </div>
+                )}
+              </div>
             ) : (
               <div className="relative flex flex-1 items-center justify-center p-8 text-sm text-zinc-500 dark:text-zinc-400">
                 <div className="flex items-center gap-2 rounded-full px-3 py-2 bg-white/70 text-zinc-700 shadow-sm dark:bg-neutral-800/70 dark:text-zinc-200">
