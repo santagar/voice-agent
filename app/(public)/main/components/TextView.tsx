@@ -22,6 +22,9 @@ export type TextViewProps = {
   showAssistantText: boolean;
   shouldShowInput: boolean;
   hasTypedInput: boolean;
+  micMuted: boolean;
+  showMobileControls: boolean;
+  callTimerLabel: string;
   assistantHasConfig: boolean;
   conversationHydrated: boolean;
   conversationLoadError: string | null;
@@ -31,8 +34,9 @@ export type TextViewProps = {
   onSendText: () => void;
   onStartCall: () => void;
   onEndCall: () => void;
-  onToggleMobileControls: (show: boolean) => void;
-  onSetShowMobileControls: (show: boolean) => void;
+  onToggleMobileControls: (show: boolean, force?: boolean) => void;
+  onSetShowMobileControls: (show: boolean, force?: boolean) => void;
+  onOpenCallControls?: () => void;
   onCopy: (text: string) => void;
   onSpeak: (text: string) => void;
 };
@@ -52,6 +56,9 @@ export function TextView({
   showAssistantText,
   shouldShowInput,
   hasTypedInput,
+  micMuted,
+  showMobileControls,
+  callTimerLabel,
   assistantHasConfig,
   conversationHydrated,
   conversationLoadError,
@@ -63,6 +70,7 @@ export function TextView({
   onEndCall,
   onToggleMobileControls,
   onSetShowMobileControls,
+  onOpenCallControls,
   onCopy,
   onSpeak,
 }: TextViewProps) {
@@ -116,10 +124,14 @@ export function TextView({
                 assistantHasConfig={assistantHasConfig}
                 callStatus={callStatus}
                 hasTypedInput={hasTypedInput}
+                micMuted={micMuted}
+                showMobileControls={showMobileControls}
+                callTimerLabel={callTimerLabel}
                 onSendText={onSendText}
                 onStartCall={onStartCall}
                 onEndCall={onEndCall}
                 onToggleMobileControls={onSetShowMobileControls}
+                onOpenCallControls={() => onOpenCallControls?.()}
                 wrapperClassName="mt-6 pb-0"
               />
             )}
@@ -192,10 +204,14 @@ export function TextView({
           assistantHasConfig={assistantHasConfig}
           callStatus={callStatus}
           hasTypedInput={hasTypedInput}
+          micMuted={micMuted}
+          showMobileControls={showMobileControls}
+          callTimerLabel={callTimerLabel}
           onSendText={onSendText}
           onStartCall={onStartCall}
           onEndCall={onEndCall}
           onToggleMobileControls={onToggleMobileControls}
+          onOpenCallControls={() => onOpenCallControls?.()}
         />
       )}
     </>

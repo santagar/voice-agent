@@ -1,5 +1,4 @@
 import { Mic, MicOff, Volume2, VolumeX, AudioLines, X, MessageCircle, MessageCircleOff, TextCursorInput } from "lucide-react";
-import React from "react";
 import { Tooltip } from "@/components/front/ui/Tooltip";
 import { CallStatus } from "@/lib/realtime/useRealtimeSession";
 

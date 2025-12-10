@@ -108,15 +108,19 @@ export default async function ChatByIdPage({ params }: ChatByIdPageProps) {
 
   // Preload the same conversation summaries used on / so that the
   // sidebar list does not jump when opening a specific chat id.
-  const conversations = await prisma.conversation.findMany({
-    orderBy: { updatedAt: "desc" },
-    include: {
-      messages: {
-        take: 1,
-        orderBy: { createdAt: "desc" },
-      },
-    },
-  });
+  const conversations =
+    userId
+      ? await prisma.conversation.findMany({
+          where: { userId },
+          orderBy: { updatedAt: "desc" },
+          include: {
+            messages: {
+              take: 1,
+              orderBy: { createdAt: "desc" },
+            },
+          },
+        })
+      : [];
 
   const initialChats = conversations.map((conv: (typeof conversations)[number]) => {
     const last = conv.messages[0];

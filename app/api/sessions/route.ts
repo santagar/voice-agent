@@ -1,23 +1,19 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { createSessionSchema } from "./schemas";
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const {
-      userId = null,
-      assistantId,
-      conversationId = null,
-      channel = "web",
-      assistantConfig = null,
-    } = body ?? {};
-
-    if (!assistantId || typeof assistantId !== "string") {
+    const parsed = createSessionSchema.safeParse(body ?? {});
+    if (!parsed.success) {
       return NextResponse.json(
-        { error: "assistantId is required" },
+        { error: parsed.error.errors.map((e) => e.message).join(", ") },
         { status: 400 }
       );
     }
+
+    const { userId = null, assistantId, conversationId = null, channel = "web", assistantConfig = null } = parsed.data;
 
     // Reuse an active session for the same assistant + conversation + user if it exists.
     const existing = await prisma.session.findFirst({

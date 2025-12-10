@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
+import { voiceIntentSchema } from "./schemas";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -11,16 +12,16 @@ export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
   try {
-    const { text } = (await req.json()) as { text?: string };
-
-    if (!text || typeof text !== "string") {
+    const body = await req.json();
+    const parsed = voiceIntentSchema.safeParse(body);
+    if (!parsed.success) {
       return NextResponse.json(
-        { error: "Body must include 'text' as a non-empty string." },
+        { error: parsed.error.errors.map((e) => e.message).join(", ") },
         { status: 400 }
       );
     }
 
-    const trimmed = text.trim();
+    const trimmed = parsed.data.text.trim();
     if (!trimmed) {
       return NextResponse.json({ decision: "IGNORE" });
     }

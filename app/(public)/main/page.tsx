@@ -122,15 +122,19 @@ export default async function Page({ searchParams }: PageProps) {
 
   // Preload conversation summaries so the sidebar renders without
   // a visible "jump" while the client fetches /api/conversations.
-  const conversations = await prisma.conversation.findMany({
-    orderBy: { updatedAt: "desc" },
-    include: {
-      messages: {
-        take: 1,
-        orderBy: { createdAt: "desc" },
-      },
-    },
-  });
+  const conversations =
+    userId
+      ? await prisma.conversation.findMany({
+          where: { userId },
+          orderBy: { updatedAt: "desc" },
+          include: {
+            messages: {
+              take: 1,
+              orderBy: { createdAt: "desc" },
+            },
+          },
+        })
+      : [];
 
   const initialChats = conversations.map((conv) => {
     const last = conv.messages[0];

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
+import { transcribeSchema } from "./schemas";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -12,14 +13,16 @@ export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
   try {
-    const { audio } = await req.json();
-
-    if (!audio || typeof audio !== "string") {
+    const body = await req.json();
+    const parsed = transcribeSchema.safeParse(body);
+    if (!parsed.success) {
       return NextResponse.json(
-        { error: "Body must include base64-encoded 'audio'." },
+        { error: parsed.error.errors.map((e) => e.message).join(", ") },
         { status: 400 }
       );
     }
+
+    const { audio } = parsed.data;
 
     const pcmBuffer = Buffer.from(audio, "base64");
     if (!pcmBuffer.length) {

@@ -91,12 +91,27 @@ export function useApiConversations(fetchImpl: FetchLike = fetch) {
     return res.ok;
   }
 
+  async function searchConversations(query: string) {
+    const res = await fetchImpl("/api/conversations/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query }),
+    });
+    if (!res.ok) {
+      console.warn("Failed to search conversations:", res.status);
+      return [];
+    }
+    const data = await res.json().catch(() => null);
+    return Array.isArray(data?.results) ? data.results : [];
+  }
+
   return {
     listConversations,
     createConversation,
     archiveConversation,
     deleteConversation,
     renameConversation,
+    searchConversations,
     rawFetch,
     getConversationById,
   };

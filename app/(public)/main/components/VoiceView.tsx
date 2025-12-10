@@ -9,12 +9,10 @@ import { ThinkingStatus } from "./ThinkingStatus";
 import { MessageList } from "./MessageList";
 
 type VoiceViewProps = TextViewProps & {
-  micMuted: boolean;
   muted: boolean;
   showInputDuringCall: boolean;
   showMobileControls: boolean;
   callActive: boolean;
-  callTimerLabel: string;
   onToggleAssistantText: () => void;
   onToggleInputDuringCall: () => void;
   onSetInputDuringCall: (show: boolean) => void;
@@ -50,6 +48,7 @@ export function VoiceView({
   onEndCall,
   onToggleMobileControls,
   onSetShowMobileControls,
+  onOpenCallControls,
   onCopy,
   onSpeak,
   micMuted,
@@ -128,10 +127,14 @@ export function VoiceView({
                 assistantHasConfig={assistantHasConfig}
                 callStatus={callStatus}
                 hasTypedInput={hasTypedInput}
+                micMuted={micMuted}
+                showMobileControls={showMobileControls}
+                callTimerLabel={callTimerLabel}
                 onSendText={onSendText}
                 onStartCall={onStartCall}
                 onEndCall={onEndCall}
                 onToggleMobileControls={onSetShowMobileControls}
+                onOpenCallControls={() => onOpenCallControls?.()}
                 wrapperClassName="mt-6 pb-0"
               />
             )}
@@ -203,10 +206,14 @@ export function VoiceView({
           assistantHasConfig={assistantHasConfig}
           callStatus={callStatus}
           hasTypedInput={hasTypedInput}
+          micMuted={micMuted}
+          showMobileControls={showMobileControls}
+          callTimerLabel={callTimerLabel}
           onSendText={onSendText}
           onStartCall={onStartCall}
           onEndCall={onEndCall}
           onToggleMobileControls={onToggleMobileControls}
+          onOpenCallControls={() => onOpenCallControls?.()}
         />
       )}
 

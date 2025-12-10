@@ -20,6 +20,7 @@ import { Tooltip } from "@/components/front/ui/Tooltip";
 import { UserMenu } from "./UserMenu";
 import { useSession } from "../context/SessionContext";
 import { useApiConversations } from "@/hooks/useApiConversations";
+import { SearchModal } from "./SearchModal";
 
 export type ChatSummaryMode = "text" | "voice" | "mixed" | "unknown";
 
@@ -194,12 +195,19 @@ function SidebarContent({
   onChatsChange,
 }: SidebarContentProps) {
   const { loggedIn, userEmail, userName, userImage } = useSession();
-  const { listConversations } = useApiConversations();
+  const { listConversations, searchConversations } = useApiConversations();
   const listConversationsRef = useRef(listConversations);
+  const searchConversationsRef = useRef(searchConversations);
   const [chatsExpanded, setChatsExpanded] = useState(true);
   const [openChatMenuId, setOpenChatMenuId] = useState<string | null>(null);
   const [editingChatId, setEditingChatId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
+  const [showSearchModal, setShowSearchModal] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<
+    { conversationId: string; title: string; snippet?: string | null }[]
+  >([]);
+  const [searchLoading, setSearchLoading] = useState(false);
   const chatMenuRef = useRef<HTMLDivElement | null>(null);
   const chatListRef = useRef<HTMLDivElement | null>(null);
   const [chatListScrollable, setChatListScrollable] = useState(false);
@@ -232,16 +240,51 @@ function SidebarContent({
       }
       if (key === "k") {
         e.preventDefault();
-        onFocusInput?.();
+        setShowSearchModal(true);
       }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onNewChat, onFocusInput]);
+  }, [onNewChat]);
 
   useEffect(() => {
     listConversationsRef.current = listConversations;
-  }, [listConversations]);
+    searchConversationsRef.current = searchConversations;
+  }, [listConversations, searchConversations]);
+
+  useEffect(() => {
+    if (!showSearchModal) return;
+    const trimmed = searchQuery.trim();
+    if (!trimmed) {
+      setSearchResults([]);
+      setSearchLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setSearchLoading(true);
+    const id = window.setTimeout(() => {
+      searchConversationsRef.current(trimmed)
+        .then((res) => {
+          if (cancelled) return;
+          setSearchResults(res);
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          console.error("Failed to search chats:", err);
+          setSearchResults([]);
+        })
+        .finally(() => {
+          if (!cancelled) setSearchLoading(false);
+        });
+    }, 220);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(id);
+    };
+  }, [
+    searchQuery,
+    showSearchModal,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -307,6 +350,28 @@ function SidebarContent({
     window.addEventListener("resize", recomputeScroll);
     return () => window.removeEventListener("resize", recomputeScroll);
   }, [chatsExpanded, orderedChats.length]);
+
+  useEffect(() => {
+    if (!showSearchModal) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setShowSearchModal(false);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [showSearchModal]);
+
+  const handleSearchSelect = (conversationId: string) => {
+    setShowSearchModal(false);
+    setSearchQuery("");
+    setSearchResults([]);
+    onSelectChat(conversationId);
+    if (showMobileSidebar && onCloseMobileSidebar) {
+      onCloseMobileSidebar();
+    }
+  };
 
   const hasChatSection = !sidebarCollapsed && chats.length > 0;
   const userBlockBorder =
@@ -408,6 +473,8 @@ function SidebarContent({
                 onOpenSettings();
               } else if (key === "new") {
                 onNewChat();
+              } else if (key === "search") {
+                setShowSearchModal(true);
               }
               if (showMobileSidebar && onCloseMobileSidebar) {
                 onCloseMobileSidebar();
@@ -585,7 +652,11 @@ function SidebarContent({
                                 prev === chat.id ? null : chat.id
                               );
                             }}
-                            className="absolute right-1 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center text-gray-500 opacity-0 group-hover:opacity-100 group-hover:text-gray-900 transition-opacity cursor-pointer"
+                            className={`absolute right-1 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-2xl opacity-0 group-hover:opacity-100 transition ${
+                              isDark
+                                ? "text-gray-300 hover:text-white hover:bg-white/10"
+                                : "text-gray-500 hover:text-gray-900 hover:bg-zinc-200/60"
+                            } cursor-pointer`}
                             aria-label={t("chat.sidebar.chatMenu.open")}
                           >
                             <Ellipsis className="h-4 w-4" />
@@ -601,6 +672,7 @@ function SidebarContent({
                               ? "border-white/10 bg-neutral-800/95"
                               : "border-zinc-200 bg-white"
                           }`}
+                          onClick={() => setOpenChatMenuId(null)}
                         >
                           <div className="px-1 pt-1">
                             <button
@@ -739,6 +811,23 @@ function SidebarContent({
           in the main Client component so it can float above both
           sidebar and content. Sidebar is responsible only for the
           trigger button. */}
+
+      <SearchModal
+        open={showSearchModal}
+        isDark={isDark}
+        searchQuery={searchQuery}
+        searchResults={searchResults}
+        searchLoading={searchLoading}
+        recentChats={orderedChats}
+        onChangeQuery={setSearchQuery}
+        onClose={() => {
+          setShowSearchModal(false);
+          setSearchQuery("");
+          setSearchResults([]);
+        }}
+        onSelect={handleSearchSelect}
+        t={t}
+      />
     </div>
   );
 }

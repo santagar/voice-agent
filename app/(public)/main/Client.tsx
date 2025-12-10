@@ -211,6 +211,7 @@ function MainClientInner({
     },
   });
 
+  const [isMobile, setIsMobile] = useState(false);
   const [showMobileControls, setShowMobileControls] = useState(false);
   const [showInputDuringCall, setShowInputDuringCall] = useState(false);
   const [showAssistantText, setShowAssistantText] = useState(true);
@@ -239,6 +240,36 @@ function MainClientInner({
   useEffect(() => {
     activeConversationIdRef.current = activeConversationId;
   }, [activeConversationId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const mq = window.matchMedia("(max-width: 767px)");
+    const applyMatch = (event: MediaQueryListEvent | MediaQueryList) => {
+      const matches = event.matches;
+      setIsMobile(matches);
+      if (!matches) {
+        setShowMobileControls(false);
+      }
+    };
+
+    applyMatch(mq);
+
+    const listener = (event: MediaQueryListEvent) => applyMatch(event);
+    if (typeof mq.addEventListener === "function") {
+      mq.addEventListener("change", listener);
+    } else {
+      mq.addListener(listener);
+    }
+
+    return () => {
+      if (typeof mq.removeEventListener === "function") {
+        mq.removeEventListener("change", listener);
+      } else {
+        mq.removeListener(listener);
+      }
+    };
+  }, []);
   useEffect(() => {
     async function ensureSessionEntry() {
       // No crear sesión hasta tener el usuario cargado
@@ -515,6 +546,32 @@ function MainClientInner({
     setChats,
   });
 
+  const handleMobileControlsChange = useCallback(
+    (show: boolean, force?: boolean) => {
+      if (show && !isMobile && !force) {
+        setShowMobileControls(false);
+        return;
+      }
+      setShowMobileControls(show);
+    },
+    [isMobile]
+  );
+
+  const toggleCallControls = useCallback(
+    () => handleMobileControlsChange(!showMobileControls, true),
+    [handleMobileControlsChange, showMobileControls]
+  );
+
+  useEffect(() => {
+    if (!callActive) {
+      handleMobileControlsChange(false);
+      return;
+    }
+
+    setShowInputDuringCall(!isMobile);
+    handleMobileControlsChange(true);
+  }, [callActive, handleMobileControlsChange, isMobile]);
+
   function speak(text: string) {
     const trimmed = text.trim();
     if (!trimmed) return;
@@ -540,8 +597,9 @@ function MainClientInner({
   }
 
   function handleStartCall() {
-    setShowInputDuringCall(false);
+    setShowInputDuringCall(!isMobile);
     setIsNewChatLayout(false);
+    handleMobileControlsChange(true);
     startCall();
   }
 
@@ -831,41 +889,40 @@ function MainClientInner({
                   showAssistantText={showAssistantText}
                   shouldShowInput={shouldShowInput}
                   hasTypedInput={hasTypedInput}
+                  micMuted={micMuted}
+                  callTimerLabel={callTimerLabel}
                   assistantHasConfig={assistantHasConfig}
-                conversationHydrated={conversationHydrated}
-                conversationLoadError={conversationLoadError}
-                initialChatId={activeConversationId ?? initialChatId}
-                isNewChatLayout={isNewChatLayout}
-                hydratedFromServer={hydratedFromServer}
-          onSendText={handleSendText}
-          onEndCall={endCall}
-          onToggleMobileControls={setShowMobileControls}
-          onStartCall={() => {
-            handleStartCall();
-                  setShowMobileControls(true);
-                }}
-                onSetShowMobileControls={setShowMobileControls}
-                onCopy={handleCopy}
-                onSpeak={speak}
-                micMuted={micMuted}
-                muted={muted}
-                showInputDuringCall={showInputDuringCall}
-                showMobileControls={showMobileControls}
-                onToggleAssistantText={() =>
-                  setShowAssistantText((prev) => !prev)
-                }
-          onToggleInputDuringCall={() =>
-            setShowInputDuringCall((prev) => !prev)
-          }
-          onSetInputDuringCall={setShowInputDuringCall}
-          onToggleSpeaker={toggleSpeaker}
-          onToggleMic={toggleMic}
-          onResetAfterEnd={resetToNewChatIfEmpty}
-          callActive={callActive}
-          callTimerLabel={callTimerLabel}
-        />
-      ) : (
-        <TextView
+                  conversationHydrated={conversationHydrated}
+                  conversationLoadError={conversationLoadError}
+                  initialChatId={activeConversationId ?? initialChatId}
+                  isNewChatLayout={isNewChatLayout}
+                  hydratedFromServer={hydratedFromServer}
+                  onSendText={handleSendText}
+                  onEndCall={endCall}
+                  onToggleMobileControls={handleMobileControlsChange}
+                  onOpenCallControls={toggleCallControls}
+                  onStartCall={handleStartCall}
+                  onSetShowMobileControls={handleMobileControlsChange}
+                  onCopy={handleCopy}
+                  onSpeak={speak}
+                  muted={muted}
+                  showInputDuringCall={showInputDuringCall}
+                  showMobileControls={showMobileControls}
+                  onToggleAssistantText={() =>
+                    setShowAssistantText((prev) => !prev)
+                  }
+                  onToggleInputDuringCall={() =>
+                    setShowInputDuringCall((prev) => !prev)
+                  }
+                  onSetInputDuringCall={setShowInputDuringCall}
+                  onToggleSpeaker={toggleSpeaker}
+                  onToggleMic={toggleMic}
+                  onResetAfterEnd={resetToNewChatIfEmpty}
+                  callActive={callActive}
+                  callTimerLabel={callTimerLabel}
+                />
+              ) : (
+                <TextView
                   isDark={isDark}
                   t={t}
                   chatRef={chatRef}
@@ -880,6 +937,9 @@ function MainClientInner({
                   showAssistantText={showAssistantText}
                   shouldShowInput={shouldShowInput}
                   hasTypedInput={hasTypedInput}
+                  micMuted={micMuted}
+                  showMobileControls={showMobileControls}
+                  callTimerLabel={callTimerLabel}
                   assistantHasConfig={assistantHasConfig}
                   conversationHydrated={conversationHydrated}
                   conversationLoadError={conversationLoadError}
@@ -888,12 +948,10 @@ function MainClientInner({
                   hydratedFromServer={hydratedFromServer}
                   onSendText={handleSendText}
                   onEndCall={endCall}
-                  onToggleMobileControls={setShowMobileControls}
-                  onStartCall={() => {
-                    handleStartCall();
-                    setShowMobileControls(true);
-                  }}
-                  onSetShowMobileControls={setShowMobileControls}
+                  onToggleMobileControls={handleMobileControlsChange}
+                  onOpenCallControls={toggleCallControls}
+                  onStartCall={handleStartCall}
+                  onSetShowMobileControls={handleMobileControlsChange}
                   onCopy={handleCopy}
                   onSpeak={speak}
                 />

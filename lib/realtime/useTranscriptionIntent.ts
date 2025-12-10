@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { ScopeDefinition } from "./realtimeTypes";
+import type { ScopeDefinition } from "./realtimeTypes.ts";
 
 type TranscriptionOptions = {
   useVoiceTranscribe: boolean;
@@ -13,6 +13,19 @@ type TranscriptionOptions = {
 /**
  * Handles transcription and optional intent classification for user utterances.
  */
+export function fallbackScopeDetection(
+  text: string,
+  scopeCatalog: ScopeDefinition[]
+) {
+  const lower = text.toLowerCase();
+  for (const rule of scopeCatalog) {
+    if (rule.keywords.some((kw) => kw && lower.includes(kw))) {
+      return rule.name;
+    }
+  }
+  return null;
+}
+
 export function useTranscriptionIntent({
   useVoiceTranscribe,
   minUtteranceSamples,
@@ -88,18 +101,7 @@ export function useTranscriptionIntent({
     return nextScope;
   }
 
-  function fallbackScopeDetection(
-    text: string,
-    scopeCatalog: ScopeDefinition[]
-  ) {
-    const lower = text.toLowerCase();
-    for (const rule of scopeCatalog) {
-      if (rule.keywords.some((kw) => kw && lower.includes(kw))) {
-        return rule.name;
-      }
-    }
-    return null;
-  }
+  // fallbackScopeDetection is exported at module level for testing
 
   async function autoDetectScope(
     text: string,

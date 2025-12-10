@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth/options";
 import { prisma } from "@/lib/prisma";
 
 // Lists conversations ordered by last activity, including a short preview
@@ -6,7 +8,15 @@ import { prisma } from "@/lib/prisma";
 // or assistant if needed.
 export async function GET() {
   try {
+    const session = await getServerSession(authOptions);
+    const userId = (session?.user as any)?.id as string | undefined;
+
+    if (!userId) {
+      return NextResponse.json({ conversations: [] });
+    }
+
     const conversations = await prisma.conversation.findMany({
+      where: { userId },
       orderBy: { updatedAt: "desc" },
       include: {
         messages: {

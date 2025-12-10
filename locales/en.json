@@ -17,6 +17,10 @@
 
   "chat.sidebar.newChat": "New chat",
   "chat.sidebar.search": "Search",
+  "chat.sidebar.today": "Today",
+  "chat.sidebar.yesterday": "Yesterday",
+  "chat.sidebar.previous7": "Previous 7 Days",
+  "chat.sidebar.empty": "No results",
   "chat.sidebar.settings": "Settings",
   "chat.sidebar.collapse": "Collapse sidebar",
   "chat.sidebar.close": "Close sidebar",

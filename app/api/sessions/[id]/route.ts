@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { updateSessionSchema } from "../schemas";
 
 export async function PATCH(
   request: Request,
@@ -12,34 +13,20 @@ export async function PATCH(
       return NextResponse.json({ error: "id is required" }, { status: 400 });
     }
 
-    const status = body?.status as string | undefined;
-    const conversationId =
-      body && "conversationId" in body ? body.conversationId ?? null : undefined;
-    const userId = body && "userId" in body ? body.userId ?? null : undefined;
-
-    const updates: Record<string, unknown> = {};
-    if (status !== undefined) {
-      if (status !== "closed" && status !== "expired" && status !== "active") {
-        return NextResponse.json(
-          { error: "status must be 'closed' or 'expired' or 'active'" },
-          { status: 400 }
-        );
-      }
-      updates.status = status;
-    }
-    if (conversationId !== undefined) {
-      updates.conversationId = conversationId;
-    }
-    if (userId !== undefined) {
-      updates.userId = userId;
-    }
-
-    if (Object.keys(updates).length === 0) {
+    const parsed = updateSessionSchema.safeParse(body ?? {});
+    if (!parsed.success) {
       return NextResponse.json(
-        { error: "No valid fields to update" },
+        { error: parsed.error.errors.map((e) => e.message).join(", ") },
         { status: 400 }
       );
     }
+
+    const { status, conversationId, userId } = parsed.data;
+
+    const updates: Record<string, unknown> = {};
+    if (status !== undefined) updates.status = status;
+    if (conversationId !== undefined) updates.conversationId = conversationId;
+    if (userId !== undefined) updates.userId = userId;
 
     const session = await prisma.session.update({
       where: { id },
